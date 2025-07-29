@@ -1,183 +1,256 @@
 "use client"
 
+import type React from "react"
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
-import { Car, DollarSign, TrendingUp, Calendar, Users, UserCheck, LogOut, Plus, Eye, MessageCircle } from "lucide-react"
-import { WhatsAppShare } from "@/components/whatsapp-share"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  Car,
+  Plus,
+  DollarSign,
+  TrendingUp,
+  Search,
+  Filter,
+  Edit,
+  Trash2,
+  Eye,
+  AlertCircle,
+  CheckCircle,
+  ShoppingCart,
+} from "lucide-react"
+import { getCars, updateCar, deleteCar, createBuyer, createDealer, type Car as CarType } from "@/lib/supabase-client"
 
-interface CarData {
-  id: string
-  make: string
-  model: string
-  year: number
-  registrationNumber: string
-  mileage: number
-  purchasePrice: number
-  askingPrice: number
-  purchaseDate: string
-  status: "available" | "sold"
-  soldPrice?: number
-  soldDate?: string
-  profit?: number
-  dealerCommission?: number
-  repairCosts?: number // Add this line
-  buyerName?: string
-  buyerCnic?: string
-  buyerContact?: string
-}
-
-export default function ClientDashboard() {
-  const [currentUser, setCurrentUser] = useState("")
+export default function DashboardPage() {
+  const router = useRouter()
+  const [cars, setCars] = useState<CarType[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
-  const [isMarkSoldOpen, setIsMarkSoldOpen] = useState(false)
-  const [selectedCarForSale, setSelectedCarForSale] = useState<CarData | null>(null)
-  const [saleData, setSaleData] = useState({
+  const [statusFilter, setStatusFilter] = useState<string>("available")
+  const [clientId, setClientId] = useState<string>("")
+  const [clientUsername, setClientUsername] = useState<string>("")
+
+  // Edit car state
+  const [editingCar, setEditingCar] = useState<CarType | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+
+  // Mark as sold state
+  const [sellingCar, setSellingCar] = useState<CarType | null>(null)
+  const [isSoldDialogOpen, setIsSoldDialogOpen] = useState(false)
+  const [soldData, setSoldData] = useState({
     soldPrice: "",
-    soldDate: "",
+    soldDate: new Date().toISOString().split("T")[0],
     buyerName: "",
     buyerCnic: "",
-    buyerContact: "",
-    repairCosts: "", // Add this line
+    buyerPhone: "",
+    moneySpent: "",
+    dealerCommission: "",
+    dealerName: "",
+    dealerCnic: "",
+    dealerPhone: "",
   })
 
-  // Add authentication check
   useEffect(() => {
+    // Check authentication
+    const storedClientId = localStorage.getItem("clientId")
+    const storedUsername = localStorage.getItem("clientUsername")
     const userType = localStorage.getItem("userType")
-    const username = localStorage.getItem("username")
 
-    if (userType !== "client" || !username) {
-      window.location.href = "/"
+    if (!storedClientId || userType !== "client") {
+      router.push("/")
       return
     }
 
-    setCurrentUser(username)
-  }, [])
+    setClientId(storedClientId)
+    setClientUsername(storedUsername || "")
+    loadCars(storedClientId)
+  }, [router])
 
-  // Update the profit calculation formula
-  const calculateProfit = (soldPrice: number, purchasePrice: number, dealerCommission = 0, repairCosts = 0) => {
-    return soldPrice - purchasePrice - dealerCommission - repairCosts
+  const loadCars = async (clientId: string) => {
+    try {
+      setLoading(true)
+      setError("")
+      const carsData = await getCars(clientId)
+      setCars(carsData)
+    } catch (error: any) {
+      console.error("Error loading cars:", error)
+      setError(`Failed to load cars: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // Update the cars data with proper dealer commission
-  const [cars] = useState<CarData[]>([
-    {
-      id: "car-1",
-      make: "Toyota",
-      model: "Corolla",
-      year: 2020,
-      registrationNumber: "LZH-238",
-      mileage: 45000,
-      purchasePrice: 2500000,
-      askingPrice: 2800000,
-      purchaseDate: "2024-01-10",
-      status: "sold",
-      soldPrice: 2750000,
-      soldDate: "2024-01-18",
-      dealerCommission: 50000,
-      repairCosts: 25000,
-      profit: calculateProfit(2750000, 2500000, 50000, 25000),
-      buyerName: "Ahmed Ali Khan",
-      buyerCnic: "42101-1234567-1",
-      buyerContact: "+92-300-1234567",
-    },
-    {
-      id: "car-2",
-      make: "Honda",
-      model: "Civic",
-      year: 2019,
-      registrationNumber: "KHI-456",
-      mileage: 62000,
-      purchasePrice: 3000000,
-      askingPrice: 3400000,
-      purchaseDate: "2024-01-12",
-      status: "available",
-    },
-    {
-      id: "car-3",
-      make: "Suzuki",
-      model: "Alto",
-      year: 2021,
-      registrationNumber: "ISB-789",
-      mileage: 28000,
-      purchasePrice: 1800000,
-      askingPrice: 2100000,
-      purchaseDate: "2024-01-15",
-      status: "sold",
-      soldPrice: 2050000,
-      soldDate: "2024-01-20",
-      dealerCommission: 30000,
-      repairCosts: 15000,
-      profit: calculateProfit(2050000, 1800000, 30000, 15000),
-      buyerName: "Sara Malik",
-      buyerCnic: "42101-9876543-2",
-      buyerContact: "+92-321-9876543",
-    },
-    {
-      id: "car-4",
-      make: "Toyota",
-      model: "Camry",
-      year: 2021,
-      registrationNumber: "LHR-321",
-      mileage: 35000,
-      purchasePrice: 4500000,
-      askingPrice: 4900000,
-      purchaseDate: "2024-01-20",
-      status: "available",
-    },
-  ])
+  const handleEditCar = (car: CarType) => {
+    setEditingCar(car)
+    setIsEditDialogOpen(true)
+  }
 
-  // Calculate profits
-  const soldCars = cars.filter((car) => car.status === "sold")
-  const totalProfit = soldCars.reduce((sum, car) => sum + (car.profit || 0), 0)
+  const handleUpdateCar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingCar) return
 
-  // Last 7 days profit
-  const sevenDaysAgo = new Date()
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-  const recentSoldCars = soldCars.filter((car) => car.soldDate && new Date(car.soldDate) >= sevenDaysAgo)
-  const weeklyProfit = recentSoldCars.reduce((sum, car) => sum + (car.profit || 0), 0)
+    try {
+      setError("")
+      setSuccess("")
 
-  // Monthly profit (current month)
-  const currentMonth = new Date().getMonth()
-  const currentYear = new Date().getFullYear()
-  const monthlySoldCars = soldCars.filter((car) => {
-    if (!car.soldDate) return false
-    const soldDate = new Date(car.soldDate)
-    return soldDate.getMonth() === currentMonth && soldDate.getFullYear() === currentYear
-  })
-  const monthlyProfit = monthlySoldCars.reduce((sum, car) => sum + (car.profit || 0), 0)
+      await updateCar(editingCar.id, {
+        make: editingCar.make,
+        model: editingCar.model,
+        year: editingCar.year,
+        registration_number: editingCar.registration_number,
+        mileage: editingCar.mileage,
+        purchase_price: editingCar.purchase_price,
+        asking_price: editingCar.asking_price,
+        purchase_date: editingCar.purchase_date,
+        owner_name: editingCar.owner_name,
+        dealer_commission: editingCar.dealer_commission,
+        status: editingCar.status,
+        description: editingCar.description,
+      })
 
-  // Filter cars based on search term
-  const filteredAvailableCars = cars
-    .filter((car) => car.status === "available")
-    .filter(
-      (car) =>
-        car.make.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        car.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        car.registrationNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        car.year.toString().includes(searchTerm),
-    )
+      setSuccess("Car updated successfully!")
+      setIsEditDialogOpen(false)
+      setEditingCar(null)
+      await loadCars(clientId)
+    } catch (error: any) {
+      console.error("Error updating car:", error)
+      setError(`Failed to update car: ${error.message}`)
+    }
+  }
 
-  const filteredSoldCars = soldCars.filter(
-    (car) =>
-      car.make.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      car.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      car.registrationNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      car.year.toString().includes(searchTerm) ||
-      (car.buyerName && car.buyerName.toLowerCase().includes(searchTerm.toLowerCase())),
-  )
+  const handleMarkAsSold = (car: CarType) => {
+    setSellingCar(car)
+    setSoldData({
+      soldPrice: car.asking_price.toString(),
+      soldDate: new Date().toISOString().split("T")[0],
+      buyerName: "",
+      buyerCnic: "",
+      buyerPhone: "",
+      moneySpent: "",
+      dealerCommission: car.dealer_commission?.toString() || "",
+      dealerName: "",
+      dealerCnic: "",
+      dealerPhone: "",
+    })
+    setIsSoldDialogOpen(true)
+  }
+
+  const handleSoldSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!sellingCar) return
+
+    try {
+      setError("")
+      setSuccess("")
+
+      // Create buyer if provided
+      let buyerId = null
+      if (soldData.buyerName && soldData.buyerCnic) {
+        try {
+          const buyer = await createBuyer({
+            client_id: clientId,
+            name: soldData.buyerName,
+            email: "", // Will be empty for now
+            phone: soldData.buyerPhone || "",
+            address: "", // Will be empty for now
+            cnic: soldData.buyerCnic,
+          })
+          buyerId = buyer.id
+          console.log("Buyer created successfully:", buyer)
+        } catch (error) {
+          console.error("Error creating buyer:", error)
+          // Continue even if buyer creation fails
+        }
+      }
+
+      // Create dealer if provided
+      let dealerId = null
+      if (soldData.dealerName && soldData.dealerCnic) {
+        try {
+          const dealer = await createDealer({
+            client_id: clientId,
+            name: soldData.dealerName,
+            email: "", // Will be empty for now
+            phone: soldData.dealerPhone || "",
+            address: "", // Will be empty for now
+            cnic: soldData.dealerCnic,
+            license_number: "", // Will be empty for now
+          })
+          dealerId = dealer.id
+          console.log("Dealer created successfully:", dealer)
+        } catch (error) {
+          console.error("Error creating dealer:", error)
+          // Continue even if dealer creation fails
+        }
+      }
+
+      // Calculate final sold price and commission
+      const finalSoldPrice = Number.parseFloat(soldData.soldPrice) || sellingCar.asking_price
+      const finalCommission = Number.parseFloat(soldData.dealerCommission) || 0
+
+      // Update car as sold with all the information
+      await updateCar(sellingCar.id, {
+        status: "sold",
+        asking_price: finalSoldPrice, // This becomes the sold price
+        dealer_commission: finalCommission,
+        buyer_id: buyerId,
+        dealer_id: dealerId,
+        // Store additional sale information in description if needed
+        description:
+          sellingCar.description +
+          (soldData.moneySpent ? `\n\nMoney spent on car: ₨${soldData.moneySpent}` : "") +
+          `\nSold on: ${soldData.soldDate}` +
+          (soldData.buyerName ? `\nBuyer: ${soldData.buyerName}` : "") +
+          (soldData.dealerName ? `\nDealer: ${soldData.dealerName}` : ""),
+      })
+
+      setSuccess(
+        `Car marked as sold successfully! ${buyerId ? "Buyer profile created. " : ""}${dealerId ? "Dealer profile created." : ""}`,
+      )
+      setIsSoldDialogOpen(false)
+      setSellingCar(null)
+      setSoldData({
+        soldPrice: "",
+        soldDate: new Date().toISOString().split("T")[0],
+        buyerName: "",
+        buyerCnic: "",
+        buyerPhone: "",
+        moneySpent: "",
+        dealerCommission: "",
+        dealerName: "",
+        dealerCnic: "",
+        dealerPhone: "",
+      })
+      await loadCars(clientId)
+    } catch (error: any) {
+      console.error("Error marking car as sold:", error)
+      setError(`Failed to mark car as sold: ${error.message}`)
+    }
+  }
+
+  const handleDeleteCar = async (carId: string, carName: string) => {
+    if (!confirm(`Are you sure you want to delete "${carName}"? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setError("")
+      await deleteCar(carId)
+      setSuccess(`Car "${carName}" deleted successfully!`)
+      await loadCars(clientId)
+    } catch (error: any) {
+      console.error("Error deleting car:", error)
+      setError(`Failed to delete car: ${error.message}`)
+    }
+  }
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-PK", {
@@ -187,523 +260,563 @@ export default function ClientDashboard() {
     }).format(amount)
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem("userType")
-    localStorage.removeItem("username")
-    window.location.href = "/"
-  }
+  const filteredCars = cars.filter((car) => {
+    const matchesSearch =
+      car.make.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      car.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      car.registration_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      car.owner_name.toLowerCase().includes(searchTerm.toLowerCase())
 
-  const createCarShareMessage = (car: any) => {
+    const matchesStatus = statusFilter === "all" || car.status === statusFilter
+
+    return matchesSearch && matchesStatus
+  })
+
+  const totalValue = cars.filter((car) => car.status === "available").reduce((sum, car) => sum + car.asking_price, 0)
+  const availableCars = cars.filter((car) => car.status === "available").length
+  const soldCars = cars.filter((car) => car.status === "sold").length
+
+  // Calculate monthly profit
+  const currentMonth = new Date().getMonth()
+  const currentYear = new Date().getFullYear()
+  const monthlyProfit = cars
+    .filter((car) => {
+      if (car.status !== "sold") return false
+      const carDate = new Date(car.updated_at)
+      return carDate.getMonth() === currentMonth && carDate.getFullYear() === currentYear
+    })
+    .reduce((sum, car) => {
+      const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0)
+      return sum + profit
+    }, 0)
+
+  if (!clientId) {
     return (
-      `🚗 *${car.make} ${car.model} ${car.year}*\n\n` +
-      `💰 *Price:* ${new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(car.askingPrice)}\n` +
-      `📅 *Year:* ${car.year}\n` +
-      `🛣️ *Mileage:* ${car.mileage.toLocaleString()} km\n` + // Add this line
-      `👤 *Owner:* ${car.ownerName}\n` +
-      `📋 *Status:* ${car.status === "available" ? "Available" : "Sold"}\n\n` +
-      `📝 *Description:* ${car.description || "Excellent condition vehicle"}\n\n` +
-      `Contact us for more details and to schedule a viewing!`
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
     )
-  }
-
-  const handleMarkAsSold = () => {
-    if (selectedCarForSale && saleData.soldPrice && saleData.soldDate && saleData.buyerName) {
-      const updatedCars = cars.map((car) => {
-        if (car.id === selectedCarForSale.id) {
-          return {
-            ...car,
-            status: "sold" as const,
-            soldPrice: Number.parseFloat(saleData.soldPrice),
-            soldDate: saleData.soldDate,
-            buyerName: saleData.buyerName,
-            buyerCnic: saleData.buyerCnic,
-            buyerContact: saleData.buyerContact,
-            repairCosts: saleData.repairCosts ? Number.parseFloat(saleData.repairCosts) : 0,
-            profit: calculateProfit(
-              Number.parseFloat(saleData.soldPrice),
-              car.purchasePrice,
-              car.dealerCommission || 0,
-              saleData.repairCosts ? Number.parseFloat(saleData.repairCosts) : 0,
-            ),
-          }
-        }
-        return car
-      })
-      // In real app, update the cars state
-      alert("Car marked as sold successfully!")
-      setIsMarkSoldOpen(false)
-      setSaleData({ soldPrice: "", soldDate: "", buyerName: "", buyerCnic: "", buyerContact: "", repairCosts: "" })
-      setSelectedCarForSale(null)
-    }
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center mr-3">
-                <Car className="w-4 h-4 text-white" />
+          <div className="flex items-center justify-between py-4">
+            <div className="flex items-center space-x-3 lg:ml-0 ml-12">
+              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                <Car className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Car Showroom Dashboard</h1>
-                <p className="text-sm text-gray-600">Welcome, {currentUser}</p>
+                <h1 className="text-2xl font-bold text-gray-900">Car Inventory</h1>
+                <p className="text-sm text-gray-600">Welcome back, {clientUsername}</p>
               </div>
             </div>
-            <Button variant="outline" onClick={handleLogout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
+            <div className="flex items-center space-x-3">
+              <Button onClick={() => router.push("/dashboard/add-car")}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Car
+              </Button>
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Success/Error Messages */}
+        {success && (
+          <Alert className="mb-6 border-green-200 bg-green-50">
+            <CheckCircle className="h-4 w-4 text-green-600" />
+            <AlertDescription className="text-green-800">{success}</AlertDescription>
+          </Alert>
+        )}
+
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Cars</CardTitle>
+              <CardTitle className="text-sm font-medium">Available Cars</CardTitle>
               <Car className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{cars.length}</div>
-              <p className="text-xs text-muted-foreground">
-                {cars.filter((car) => car.status === "available").length} available
-              </p>
+              <div className="text-2xl font-bold">{availableCars}</div>
+              <p className="text-xs text-muted-foreground">Ready for sale</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Sold This Month</CardTitle>
+              <ShoppingCart className="h-4 w-4 text-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{soldCars}</div>
+              <p className="text-xs text-muted-foreground">Completed sales</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Monthly Profit</CardTitle>
+              <TrendingUp className="h-4 w-4 text-blue-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-600">{formatCurrency(monthlyProfit)}</div>
+              <p className="text-xs text-muted-foreground">This month's earnings</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Inventory Value</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(monthlyProfit)}</div>
-              <p className="text-xs text-muted-foreground">{monthlySoldCars.length} cars sold this month</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Weekly Profit</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(weeklyProfit)}</div>
-              <p className="text-xs text-muted-foreground">Last 7 days</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalProfit)}</div>
-              <p className="text-xs text-muted-foreground">All time earnings</p>
+              <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
+              <p className="text-xs text-muted-foreground">Available cars value</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Main Content */}
-        <Tabs defaultValue="cars" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="cars">Car Inventory</TabsTrigger>
-            <TabsTrigger value="sold">Sold Cars</TabsTrigger>
-            <TabsTrigger value="buyers">Buyers</TabsTrigger>
-            <TabsTrigger value="dealers">Dealers</TabsTrigger>
-            <TabsTrigger value="reports">Reports</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="cars">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Car Inventory</CardTitle>
-                    <CardDescription>Manage your car listings and profiles</CardDescription>
-                  </div>
-                  <Button onClick={() => (window.location.href = "/dashboard/add-car")}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Car
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {/* Search Bar */}
-                <div className="mb-6">
+        {/* Search and Filter */}
+        <Card className="mb-6">
+          <CardContent className="p-6">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <Input
-                    placeholder="Search cars by make, model, registration number, or year..."
+                    placeholder="Search cars by make, model, registration, or owner..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="max-w-md"
+                    className="pl-10"
                   />
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredAvailableCars.map((car) => (
-                    <Card key={car.id} className="overflow-hidden">
-                      <div className="aspect-video bg-gray-200 flex items-center justify-center">
-                        <Car className="w-12 h-12 text-gray-400" />
-                      </div>
-                      <CardContent className="p-4">
-                        <div className="flex justify-between items-start mb-2">
-                          <h3 className="font-semibold text-lg">
-                            {car.make} {car.model}
-                          </h3>
-                          <Badge variant="outline">{car.year}</Badge>
-                        </div>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Registration:</span>
-                            <span className="font-medium">{car.registrationNumber}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Mileage:</span>
-                            <span>{car.mileage.toLocaleString()} km</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Purchase:</span>
-                            <span>{formatCurrency(car.purchasePrice)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Asking:</span>
-                            <span className="font-medium">{formatCurrency(car.askingPrice)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Date:</span>
-                            <span>{car.purchaseDate}</span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 mt-4">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1 bg-transparent"
-                            onClick={() => (window.location.href = `/dashboard/cars/${car.id}`)}
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            View
-                          </Button>
-                          <WhatsAppShare message={createCarShareMessage(car)} size="sm" className="flex-1">
-                            <MessageCircle className="w-4 h-4 mr-1" />
-                            Share
-                          </WhatsAppShare>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedCarForSale(car)
-                              setIsMarkSoldOpen(true)
-                            }}
-                          >
-                            <DollarSign className="w-4 h-4 mr-1" />
-                            Sell
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="sold">
-            <Card>
-              <CardHeader>
-                <CardTitle>Sold Cars</CardTitle>
-                <CardDescription>Track your sold vehicles and profits</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {/* Search Bar */}
-                <div className="mb-6">
-                  <Input
-                    placeholder="Search sold cars by make, model, registration, buyer name..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="max-w-md"
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  {filteredSoldCars.map((car) => (
-                    <Card key={car.id}>
-                      <CardContent className="p-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-semibold text-lg">
-                              {car.make} {car.model} ({car.year}) - {car.registrationNumber}
-                            </h3>
-                            <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mt-2 text-sm">
-                              <div>
-                                <span className="text-muted-foreground">Purchase:</span>
-                                <div className="font-medium">{formatCurrency(car.purchasePrice)}</div>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Sold:</span>
-                                <div className="font-medium">{formatCurrency(car.soldPrice || 0)}</div>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Commission:</span>
-                                <div className="font-medium text-orange-600">
-                                  {formatCurrency(car.dealerCommission || 0)}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Repairs:</span>
-                                <div className="font-medium text-red-600">{formatCurrency(car.repairCosts || 0)}</div>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Net Profit:</span>
-                                <div className="font-medium text-green-600">{formatCurrency(car.profit || 0)}</div>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Sold Date:</span>
-                                <div className="font-medium">{car.soldDate}</div>
-                              </div>
-                            </div>
-                            {car.buyerName && (
-                              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                                <h4 className="font-medium text-sm mb-2">Buyer Details:</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                                  <div>
-                                    <span className="text-muted-foreground">Name:</span>
-                                    <div className="font-medium">{car.buyerName}</div>
-                                  </div>
-                                  <div>
-                                    <span className="text-muted-foreground">CNIC:</span>
-                                    <div className="font-medium">{car.buyerCnic || "N/A"}</div>
-                                  </div>
-                                  <div>
-                                    <span className="text-muted-foreground">Contact:</span>
-                                    <div className="font-medium">{car.buyerContact || "N/A"}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-2">
-                            <Badge variant="secondary">Sold</Badge>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => (window.location.href = `/dashboard/cars/${car.id}`)}
-                            >
-                              <Eye className="w-4 h-4 mr-1" />
-                              Details
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="mt-4">
-                          <WhatsAppShare
-                            message={`🎉 *SOLD* - ${car.make} ${car.model} ${car.year} (${car.registrationNumber})\n\n💰 Sold for: ${formatCurrency(car.soldPrice || 0)}\n📅 Sold on: ${car.soldDate}\n💵 Profit: ${formatCurrency(car.profit || 0)}\n👤 Buyer: ${car.buyerName}\n\nAnother successful sale! Contact us for similar vehicles.`}
-                            variant="outline"
-                            size="sm"
-                          >
-                            <MessageCircle className="w-4 h-4 mr-2" />
-                            Share Sale
-                          </WhatsAppShare>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="buyers">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Buyer Profiles</CardTitle>
-                    <CardDescription>Manage customer information and transaction history</CardDescription>
-                  </div>
-                  <Button onClick={() => (window.location.href = "/dashboard/buyers")}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Manage Buyers
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>Click "Manage Buyers" to add and manage buyer profiles.</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="dealers">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Dealer Profiles</CardTitle>
-                    <CardDescription>Manage dealer relationships and commissions</CardDescription>
-                  </div>
-                  <Button onClick={() => (window.location.href = "/dashboard/dealers")}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Manage Dealers
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  <UserCheck className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>Click "Manage Dealers" to add and manage dealer profiles.</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="reports">
-            <Card>
-              <CardHeader>
-                <CardTitle>Business Reports</CardTitle>
-                <CardDescription>Generate and view detailed business analytics</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Profit Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex justify-between">
-                          <span>This Week:</span>
-                          <span className="font-medium">{formatCurrency(weeklyProfit)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>This Month:</span>
-                          <span className="font-medium">{formatCurrency(monthlyProfit)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Total:</span>
-                          <span className="font-medium">{formatCurrency(totalProfit)}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Inventory Status</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex justify-between">
-                          <span>Available Cars:</span>
-                          <span className="font-medium">{cars.filter((car) => car.status === "available").length}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Sold Cars:</span>
-                          <span className="font-medium">{soldCars.length}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Total Investment:</span>
-                          <span className="font-medium">
-                            {formatCurrency(cars.reduce((sum, car) => sum + car.purchasePrice, 0))}
-                          </span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
-      {/* Mark as Sold Dialog */}
-      <Dialog open={isMarkSoldOpen} onOpenChange={setIsMarkSoldOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Mark Car as Sold</DialogTitle>
-            <DialogDescription>
-              {selectedCarForSale &&
-                `${selectedCarForSale.make} ${selectedCarForSale.model} ${selectedCarForSale.year} (${selectedCarForSale.registrationNumber})`}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="sold-price">Sold Price (PKR)</Label>
-                <Input
-                  id="sold-price"
-                  type="number"
-                  value={saleData.soldPrice}
-                  onChange={(e) => setSaleData({ ...saleData, soldPrice: e.target.value })}
-                  placeholder="2750000"
-                />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="sold-date">Sold Date</Label>
-                <Input
-                  id="sold-date"
-                  type="date"
-                  value={saleData.soldDate}
-                  onChange={(e) => setSaleData({ ...saleData, soldDate: e.target.value })}
-                />
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-gray-400" />
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="available">Available Only</option>
+                  <option value="all">All Status</option>
+                  <option value="sold">Sold</option>
+                  <option value="reserved">Reserved</option>
+                  <option value="pending">Pending</option>
+                </select>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="buyer-name">Buyer Name</Label>
-              <Input
-                id="buyer-name"
-                value={saleData.buyerName}
-                onChange={(e) => setSaleData({ ...saleData, buyerName: e.target.value })}
-                placeholder="Ahmed Ali Khan"
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="buyer-cnic">Buyer CNIC</Label>
-                <Input
-                  id="buyer-cnic"
-                  value={saleData.buyerCnic}
-                  onChange={(e) => setSaleData({ ...saleData, buyerCnic: e.target.value })}
-                  placeholder="42101-1234567-1"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="buyer-contact">Buyer Contact</Label>
-                <Input
-                  id="buyer-contact"
-                  value={saleData.buyerContact}
-                  onChange={(e) => setSaleData({ ...saleData, buyerContact: e.target.value })}
-                  placeholder="+92-300-1234567"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="repair-costs">Repair Costs (PKR) - Optional</Label>
-              <Input
-                id="repair-costs"
-                type="number"
-                value={saleData.repairCosts}
-                onChange={(e) => setSaleData({ ...saleData, repairCosts: e.target.value })}
-                placeholder="25000"
-              />
-              <p className="text-xs text-gray-500">Any money spent on repairs, maintenance, or improvements</p>
-            </div>
+          </CardContent>
+        </Card>
+
+        {/* Cars Grid */}
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <span className="ml-2">Loading cars...</span>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsMarkSoldOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleMarkAsSold}>Mark as Sold</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        ) : filteredCars.length === 0 ? (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                {cars.length === 0 ? "No cars in inventory" : "No cars match your search"}
+              </h3>
+              <p className="text-gray-600 mb-4">
+                {cars.length === 0
+                  ? "Get started by adding your first car to the inventory."
+                  : "Try adjusting your search terms or filters."}
+              </p>
+              {cars.length === 0 && (
+                <Button onClick={() => router.push("/dashboard/add-car")}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Your First Car
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredCars.map((car) => (
+              <Card key={car.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                <div className="aspect-video bg-gray-100 relative">
+                  {car.images && car.images.length > 0 ? (
+                    <img
+                      src={car.images[0] || "/placeholder.svg"}
+                      alt={`${car.make} ${car.model}`}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Car className="w-12 h-12 text-gray-400" />
+                    </div>
+                  )}
+                  <div className="absolute top-2 right-2">
+                    <Badge
+                      variant={car.status === "available" ? "default" : car.status === "sold" ? "secondary" : "outline"}
+                    >
+                      {car.status}
+                    </Badge>
+                  </div>
+                </div>
+                <CardContent className="p-4">
+                  <div className="mb-2">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {car.make} {car.model} {car.year}
+                    </h3>
+                    <p className="text-sm text-gray-600">{car.registration_number}</p>
+                  </div>
+                  <div className="space-y-1 mb-4">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Price:</span>
+                      <span className="font-medium">{formatCurrency(car.asking_price)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Mileage:</span>
+                      <span>{car.mileage.toLocaleString()} km</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Owner:</span>
+                      <span className="truncate ml-2">{car.owner_name}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 bg-transparent"
+                      onClick={() => router.push(`/dashboard/cars/${car.id}`)}
+                    >
+                      <Eye className="w-4 h-4 mr-1" />
+                      View
+                    </Button>
+                    {car.status === "available" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 bg-green-50 text-green-600 hover:bg-green-100"
+                        onClick={() => handleMarkAsSold(car)}
+                      >
+                        <ShoppingCart className="w-4 h-4 mr-1" />
+                        Sold
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => handleEditCar(car)}>
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDeleteCar(car.id, `${car.make} ${car.model}`)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* Edit Car Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Car Details</DialogTitle>
+              <DialogDescription>
+                Update the information for {editingCar?.make} {editingCar?.model}
+              </DialogDescription>
+            </DialogHeader>
+            {editingCar && (
+              <form onSubmit={handleUpdateCar} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-make">Make</Label>
+                    <Input
+                      id="edit-make"
+                      value={editingCar.make}
+                      onChange={(e) => setEditingCar({ ...editingCar, make: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-model">Model</Label>
+                    <Input
+                      id="edit-model"
+                      value={editingCar.model}
+                      onChange={(e) => setEditingCar({ ...editingCar, model: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-year">Year</Label>
+                    <Input
+                      id="edit-year"
+                      type="number"
+                      value={editingCar.year}
+                      onChange={(e) => setEditingCar({ ...editingCar, year: Number.parseInt(e.target.value) })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-registration">Registration Number</Label>
+                    <Input
+                      id="edit-registration"
+                      value={editingCar.registration_number}
+                      onChange={(e) => setEditingCar({ ...editingCar, registration_number: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-mileage">Mileage (km)</Label>
+                    <Input
+                      id="edit-mileage"
+                      type="number"
+                      value={editingCar.mileage}
+                      onChange={(e) => setEditingCar({ ...editingCar, mileage: Number.parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-purchase-price">Purchase Price</Label>
+                    <Input
+                      id="edit-purchase-price"
+                      type="number"
+                      step="0.01"
+                      value={editingCar.purchase_price}
+                      onChange={(e) =>
+                        setEditingCar({ ...editingCar, purchase_price: Number.parseFloat(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-asking-price">Asking Price</Label>
+                    <Input
+                      id="edit-asking-price"
+                      type="number"
+                      step="0.01"
+                      value={editingCar.asking_price}
+                      onChange={(e) =>
+                        setEditingCar({ ...editingCar, asking_price: Number.parseFloat(e.target.value) || 0 })
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-purchase-date">Purchase Date</Label>
+                    <Input
+                      id="edit-purchase-date"
+                      type="date"
+                      value={editingCar.purchase_date}
+                      onChange={(e) => setEditingCar({ ...editingCar, purchase_date: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-owner">Owner Name</Label>
+                    <Input
+                      id="edit-owner"
+                      value={editingCar.owner_name}
+                      onChange={(e) => setEditingCar({ ...editingCar, owner_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-commission">Dealer Commission</Label>
+                    <Input
+                      id="edit-commission"
+                      type="number"
+                      step="0.01"
+                      value={editingCar.dealer_commission || 0}
+                      onChange={(e) =>
+                        setEditingCar({ ...editingCar, dealer_commission: Number.parseFloat(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-status">Status</Label>
+                    <select
+                      id="edit-status"
+                      value={editingCar.status}
+                      onChange={(e) => setEditingCar({ ...editingCar, status: e.target.value as CarType["status"] })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="available">Available</option>
+                      <option value="sold">Sold</option>
+                      <option value="reserved">Reserved</option>
+                      <option value="pending">Pending</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-description">Description</Label>
+                  <Textarea
+                    id="edit-description"
+                    value={editingCar.description || ""}
+                    onChange={(e) => setEditingCar({ ...editingCar, description: e.target.value })}
+                    rows={3}
+                  />
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit">Update Car</Button>
+                </div>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Mark as Sold Dialog */}
+        <Dialog open={isSoldDialogOpen} onOpenChange={setIsSoldDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Mark Car as Sold</DialogTitle>
+              <DialogDescription>
+                Record the sale details for {sellingCar?.make} {sellingCar?.model}
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleSoldSubmit} className="space-y-6">
+              {/* Sale Details */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Sale Details</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="sold-price">Sold Price *</Label>
+                    <Input
+                      id="sold-price"
+                      type="number"
+                      step="0.01"
+                      value={soldData.soldPrice}
+                      onChange={(e) => setSoldData({ ...soldData, soldPrice: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sold-date">Sold Date *</Label>
+                    <Input
+                      id="sold-date"
+                      type="date"
+                      value={soldData.soldDate}
+                      onChange={(e) => setSoldData({ ...soldData, soldDate: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="money-spent">Money Spent on Car (Optional)</Label>
+                    <Input
+                      id="money-spent"
+                      type="number"
+                      step="0.01"
+                      value={soldData.moneySpent}
+                      onChange={(e) => setSoldData({ ...soldData, moneySpent: e.target.value })}
+                      placeholder="Repairs, maintenance, etc."
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Buyer Information */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Buyer Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="buyer-name">Buyer Name</Label>
+                    <Input
+                      id="buyer-name"
+                      value={soldData.buyerName}
+                      onChange={(e) => setSoldData({ ...soldData, buyerName: e.target.value })}
+                      placeholder="Full name of buyer"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="buyer-cnic">Buyer CNIC</Label>
+                    <Input
+                      id="buyer-cnic"
+                      value={soldData.buyerCnic}
+                      onChange={(e) => setSoldData({ ...soldData, buyerCnic: e.target.value })}
+                      placeholder="42101-1234567-1"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="buyer-phone">Buyer Phone</Label>
+                    <Input
+                      id="buyer-phone"
+                      value={soldData.buyerPhone}
+                      onChange={(e) => setSoldData({ ...soldData, buyerPhone: e.target.value })}
+                      placeholder="+92-300-1234567"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Dealer Information */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Dealer Information (Optional)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="dealer-commission">Dealer Commission</Label>
+                    <Input
+                      id="dealer-commission"
+                      type="number"
+                      step="0.01"
+                      value={soldData.dealerCommission}
+                      onChange={(e) => setSoldData({ ...soldData, dealerCommission: e.target.value })}
+                      placeholder="Commission amount"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dealer-name">Dealer Name</Label>
+                    <Input
+                      id="dealer-name"
+                      value={soldData.dealerName}
+                      onChange={(e) => setSoldData({ ...soldData, dealerName: e.target.value })}
+                      placeholder="Dealer business name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dealer-cnic">Dealer CNIC</Label>
+                    <Input
+                      id="dealer-cnic"
+                      value={soldData.dealerCnic}
+                      onChange={(e) => setSoldData({ ...soldData, dealerCnic: e.target.value })}
+                      placeholder="42101-1234567-1"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dealer-phone">Dealer Phone</Label>
+                    <Input
+                      id="dealer-phone"
+                      value={soldData.dealerPhone}
+                      onChange={(e) => setSoldData({ ...soldData, dealerPhone: e.target.value })}
+                      placeholder="+92-300-1234567"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => setIsSoldDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                  Mark as Sold
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   )
 }

@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,9 +11,21 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
-import { ArrowLeft, Camera, Upload, Download, FileText, X } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  ArrowLeft,
+  Download,
+  FileText,
+  X,
+  Car,
+  DollarSign,
+  User,
+  AlertCircle,
+  CheckCircle,
+  ImageIcon,
+} from "lucide-react"
 import { useFileUpload } from "@/hooks/use-file-upload"
-import { dbOperations } from "@/lib/supabase-client"
+import { createCar, type Car as CarType } from "@/lib/supabase-client"
 
 interface CarCondition {
   trunk: boolean
@@ -30,32 +43,44 @@ interface CarCondition {
 }
 
 export default function AddCarPage() {
-  // Add authentication check
-  useEffect(() => {
-    const userType = localStorage.getItem("userType")
-    if (userType !== "client") {
-      window.location.href = "/"
-      return
-    }
-  }, [])
+  const router = useRouter()
+  const [clientId, setClientId] = useState<string>("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
 
-  const { uploading, uploadProgress, uploadCarImages, uploadCarDocuments } = useFileUpload()
+  // File upload hooks
+  const imageUpload = useFileUpload({
+    bucket: "car-images",
+    maxFiles: 10,
+    allowedTypes: ["image/jpeg", "image/png", "image/webp"],
+    maxSize: 5 * 1024 * 1024,
+  })
 
-  const [carData, setCarData] = useState({
+  const documentUpload = useFileUpload({
+    bucket: "car-documents",
+    maxFiles: 5,
+    allowedTypes: ["application/pdf", "image/jpeg", "image/png"],
+    maxSize: 10 * 1024 * 1024,
+  })
+
+  const [formData, setFormData] = useState({
     make: "",
     model: "",
-    year: "",
-    registrationNumber: "",
-    mileage: "",
-    purchasePrice: "",
-    askingPrice: "",
-    purchaseDate: "",
-    ownerName: "",
-    dealerName: "",
-    dealerCommission: "",
+    year: new Date().getFullYear(),
+    registration_number: "",
+    mileage: 0,
+    purchase_price: 0,
+    asking_price: 0,
+    purchase_date: new Date().toISOString().split("T")[0],
+    owner_name: "",
+    dealer_commission: 0,
+    status: "available" as "available" | "sold" | "reserved" | "pending",
     description: "",
   })
 
+  const [selectedImages, setSelectedImages] = useState<File[]>([])
+  const [selectedDocuments, setSelectedDocuments] = useState<File[]>([])
   const [carCondition, setCarCondition] = useState<CarCondition>({
     trunk: false,
     pillars: false,
@@ -71,40 +96,54 @@ export default function AddCarPage() {
     backLeftFender: false,
   })
 
-  const [images, setImages] = useState<File[]>([])
-  const [documents, setDocuments] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
-  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files)
-      setImages([...images, ...newFiles])
+  useEffect(() => {
+    // Check authentication
+    const storedClientId = localStorage.getItem("clientId")
+    const userType = localStorage.getItem("userType")
 
-      // Create previews
-      newFiles.forEach((file) => {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          setImagePreviews((prev) => [...prev, e.target?.result as string])
-        }
-        reader.readAsDataURL(file)
-      })
+    if (!storedClientId || userType !== "client") {
+      router.push("/")
+      return
     }
+
+    setClientId(storedClientId)
+  }, [router])
+
+  const handleInputChange = (field: string, value: string | number) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }))
   }
 
-  const handleDocumentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setDocuments([...documents, ...Array.from(e.target.files)])
-    }
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    setSelectedImages((prev) => [...prev, ...files].slice(0, 10))
+
+    // Create previews
+    files.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreviews((prev) => [...prev, e.target?.result as string])
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleDocumentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    setSelectedDocuments((prev) => [...prev, ...files].slice(0, 5))
   }
 
   const removeImage = (index: number) => {
-    setImages(images.filter((_, i) => i !== index))
-    setImagePreviews(imagePreviews.filter((_, i) => i !== index))
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index))
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
   const removeDocument = (index: number) => {
-    setDocuments(documents.filter((_, i) => i !== index))
+    setSelectedDocuments((prev) => prev.filter((_, i) => i !== index))
   }
 
   const calculateGrade = () => {
@@ -127,34 +166,21 @@ export default function AddCarPage() {
     const genuineParts = Object.keys(carCondition).length - paintedParts
     const grade = calculateGrade()
 
-    const auctionSheetData = {
-      car: `${carData.make} ${carData.model} ${carData.year}`,
-      registrationNumber: carData.registrationNumber,
-      mileage: carData.mileage,
-      grade: grade,
-      genuineParts: genuineParts,
-      paintedParts: paintedParts,
-      totalParts: Object.keys(carCondition).length,
-      condition: carCondition,
-      generatedDate: new Date().toLocaleDateString(),
-    }
-
-    // Create auction sheet content
     const auctionSheetContent = `
 🚗 AUCTION SHEET
 ================
 
 Car Details:
-• Make & Model: ${auctionSheetData.car}
-• Registration: ${carData.registrationNumber}
-• Mileage: ${carData.mileage} km
-• Owner: ${carData.ownerName}
-• Date: ${auctionSheetData.generatedDate}
+• Make & Model: ${formData.make} ${formData.model} ${formData.year}
+• Registration: ${formData.registration_number}
+• Mileage: ${formData.mileage} km
+• Owner: ${formData.owner_name}
+• Date: ${new Date().toLocaleDateString()}
 
 Condition Assessment:
 • Overall Grade: ${grade}/5
-• Genuine Parts: ${genuineParts}/${auctionSheetData.totalParts}
-• Painted Parts: ${paintedParts}/${auctionSheetData.totalParts}
+• Genuine Parts: ${genuineParts}/${Object.keys(carCondition).length}
+• Painted Parts: ${paintedParts}/${Object.keys(carCondition).length}
 
 Parts Condition (✓ = Painted, ✗ = Genuine):
 • Trunk: ${carCondition.trunk ? "✓ Painted" : "✗ Genuine"}
@@ -178,91 +204,128 @@ Grade Scale:
 1 = Poor (0-39% genuine parts)
 `
 
-    // In a real app, this would generate a PDF
     alert(`Auction Sheet Generated!\n\n${auctionSheetContent}`)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSubmitting(true)
+    setLoading(true)
+    setError("")
+    setSuccess("")
+
+    if (!clientId) {
+      setError("Client ID not found. Please log in again.")
+      setLoading(false)
+      return
+    }
+
+    // Validate required fields
+    if (!formData.make || !formData.model || !formData.registration_number || !formData.owner_name) {
+      setError("Please fill in all required fields")
+      setLoading(false)
+      return
+    }
+
+    if (formData.asking_price <= 0) {
+      setError("Asking price must be greater than 0")
+      setLoading(false)
+      return
+    }
 
     try {
-      const clientId = localStorage.getItem("clientId") || "temp-client-id"
+      // Generate temporary car ID for file uploads
+      const tempCarId = `temp-${Date.now()}`
 
-      // Create car record first
-      const carRecord = {
+      // Upload images
+      let imageUrls: string[] = []
+      if (selectedImages.length > 0) {
+        try {
+          imageUrls = await imageUpload.uploadCarImages(selectedImages, tempCarId)
+        } catch (uploadError: any) {
+          setError(`Failed to upload images: ${uploadError.message}`)
+          setLoading(false)
+          return
+        }
+      }
+
+      // Upload documents
+      let documentUrls: string[] = []
+      if (selectedDocuments.length > 0) {
+        try {
+          documentUrls = await documentUpload.uploadCarDocuments(selectedDocuments, tempCarId)
+        } catch (uploadError: any) {
+          setError(`Failed to upload documents: ${uploadError.message}`)
+          setLoading(false)
+          return
+        }
+      }
+
+      // Create car record
+      const carData: Omit<CarType, "id" | "created_at" | "updated_at"> = {
         client_id: clientId,
-        make: carData.make,
-        model: carData.model,
-        year: Number.parseInt(carData.year),
-        registration_number: carData.registrationNumber,
-        mileage: Number.parseInt(carData.mileage),
-        purchase_price: Number.parseFloat(carData.purchasePrice),
-        asking_price: Number.parseFloat(carData.askingPrice),
-        purchase_date: carData.purchaseDate,
-        owner_name: carData.ownerName,
-        description: carData.description,
-        dealer_commission: carData.dealerCommission ? Number.parseFloat(carData.dealerCommission) : 0,
+        make: formData.make,
+        model: formData.model,
+        year: formData.year,
+        registration_number: formData.registration_number,
+        mileage: formData.mileage,
+        purchase_price: formData.purchase_price,
+        asking_price: formData.asking_price,
+        purchase_date: formData.purchase_date,
+        owner_name: formData.owner_name,
+        dealer_commission: formData.dealer_commission || undefined,
+        status: formData.status,
+        description: formData.description || undefined,
+        images: imageUrls,
+        documents: documentUrls,
+      }
+
+      const result = await createCar(carData)
+
+      if (result.error || !result.data) {
+        throw new Error("Failed to create car record")
+      }
+
+      setSuccess("Car added successfully!")
+
+      // Clear form
+      setFormData({
+        make: "",
+        model: "",
+        year: new Date().getFullYear(),
+        registration_number: "",
+        mileage: 0,
+        purchase_price: 0,
+        asking_price: 0,
+        purchase_date: new Date().toISOString().split("T")[0],
+        owner_name: "",
+        dealer_commission: 0,
         status: "available",
-      }
+        description: "",
+      })
+      setSelectedImages([])
+      setSelectedDocuments([])
+      setImagePreviews([])
+      imageUpload.clearUploads()
+      documentUpload.clearUploads()
 
-      const { data: carResult, error: carError } = await dbOperations.createCar(carRecord)
-
-      if (carError) {
-        throw new Error(`Failed to create car: ${carError.message}`)
-      }
-
-      const carId = carResult[0].id
-
-      // Upload images if any
-      if (images.length > 0) {
-        const imageResult = await uploadCarImages(images, carId)
-        if (!imageResult.success) {
-          console.error("Failed to upload some images:", imageResult.error)
-        }
-      }
-
-      // Upload documents if any
-      if (documents.length > 0) {
-        const documentResult = await uploadCarDocuments(documents, carId)
-        if (!documentResult.success) {
-          console.error("Failed to upload some documents:", documentResult.error)
-        }
-      }
-
-      // Save car condition
-      const conditionRecord = {
-        car_id: carId,
-        trunk_painted: carCondition.trunk,
-        pillars_painted: carCondition.pillars,
-        hood_painted: carCondition.hood,
-        roof_painted: carCondition.roof,
-        front_left_door_painted: carCondition.frontLeftDoor,
-        front_right_door_painted: carCondition.frontRightDoor,
-        back_left_door_painted: carCondition.backLeftDoor,
-        back_right_door_painted: carCondition.backRightDoor,
-        front_left_fender_painted: carCondition.frontLeftFender,
-        front_right_fender_painted: carCondition.frontRightFender,
-        back_left_fender_painted: carCondition.backLeftFender,
-        back_right_fender_painted: carCondition.backRightFender,
-        grade: calculateGrade(),
-      }
-
-      // You would save this to car_conditions table
-      // await dbOperations.addCarCondition(conditionRecord)
-
-      alert("Car profile created successfully!")
-      window.location.href = "/dashboard"
-    } catch (error) {
-      console.error("Error creating car:", error)
-      alert(`Error creating car: ${error instanceof Error ? error.message : "Unknown error"}`)
+      // Redirect after success
+      setTimeout(() => {
+        router.push("/dashboard")
+      }, 2000)
+    } catch (error: any) {
+      console.error("Error adding car:", error)
+      setError(error.message || "Failed to add car")
     } finally {
-      setIsSubmitting(false)
+      setLoading(false)
     }
   }
 
-  const handleBackToDashboard = () => {
-    window.location.href = "/dashboard"
+  if (!clientId) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    )
   }
 
   const partLabels = {
@@ -274,54 +337,80 @@ Grade Scale:
     frontRightDoor: "Front Right Door",
     backLeftDoor: "Back Left Door",
     backRightDoor: "Back Right Door",
-    frontLeftFender: "Front Left Fender",
     frontRightFender: "Front Right Fender",
-    backLeftFender: "Back Left Fender",
+    frontLeftFender: "Front Left Fender",
     backRightFender: "Back Right Fender",
+    backLeftFender: "Back Left Fender",
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center py-4">
-            <Button variant="ghost" onClick={handleBackToDashboard} className="mr-4">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Dashboard
-            </Button>
-            <h1 className="text-2xl font-bold text-gray-900">Add New Car</h1>
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-4">
+            <div className="flex items-center space-x-3">
+              <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard")}>
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back
+              </Button>
+              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                <Car className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Add New Car</h1>
+                <p className="text-sm text-gray-600">Add a new vehicle to your inventory</p>
+              </div>
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Success/Error Messages */}
+        {success && (
+          <Alert className="mb-6 border-green-200 bg-green-50">
+            <CheckCircle className="h-4 w-4 text-green-600" />
+            <AlertDescription className="text-green-800">{success}</AlertDescription>
+          </Alert>
+        )}
+
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Basic Information */}
           <Card>
             <CardHeader>
-              <CardTitle>Basic Information</CardTitle>
-              <CardDescription>Enter the basic details of the car</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Car className="w-5 h-5" />
+                Basic Information
+              </CardTitle>
+              <CardDescription>Enter the basic details of the vehicle</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <Label htmlFor="make">Make</Label>
+                  <Label htmlFor="make">Make *</Label>
                   <Input
                     id="make"
-                    value={carData.make}
-                    onChange={(e) => setCarData({ ...carData, make: e.target.value })}
-                    placeholder="Toyota, Honda, etc."
+                    value={formData.make}
+                    onChange={(e) => handleInputChange("make", e.target.value)}
+                    placeholder="e.g., Toyota, Honda, BMW"
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="model">Model</Label>
+                  <Label htmlFor="model">Model *</Label>
                   <Input
                     id="model"
-                    value={carData.model}
-                    onChange={(e) => setCarData({ ...carData, model: e.target.value })}
-                    placeholder="Corolla, Civic, etc."
+                    value={formData.model}
+                    onChange={(e) => handleInputChange("model", e.target.value)}
+                    placeholder="e.g., Camry, Civic, X5"
                     required
                   />
                 </div>
@@ -330,79 +419,118 @@ Grade Scale:
                   <Input
                     id="year"
                     type="number"
-                    value={carData.year}
-                    onChange={(e) => setCarData({ ...carData, year: e.target.value })}
-                    placeholder="2020"
+                    min="1900"
+                    max={new Date().getFullYear() + 1}
+                    value={formData.year}
+                    onChange={(e) => handleInputChange("year", Number.parseInt(e.target.value))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="registration_number">Registration Number *</Label>
+                  <Input
+                    id="registration_number"
+                    value={formData.registration_number}
+                    onChange={(e) => handleInputChange("registration_number", e.target.value.toUpperCase())}
+                    placeholder="e.g., ABC-123"
                     required
                   />
                 </div>
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Financial Information */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <DollarSign className="w-5 h-5" />
+                Financial Information
+              </CardTitle>
+              <CardDescription>Enter pricing and financial details</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <Label htmlFor="registrationNumber">Registration Number</Label>
+                  <Label htmlFor="purchase_price">Purchase Price</Label>
                   <Input
-                    id="registrationNumber"
-                    value={carData.registrationNumber}
-                    onChange={(e) => setCarData({ ...carData, registrationNumber: e.target.value })}
-                    placeholder="LZH-238"
+                    id="purchase_price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.purchase_price}
+                    onChange={(e) => handleInputChange("purchase_price", Number.parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="asking_price">Asking Price *</Label>
+                  <Input
+                    id="asking_price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.asking_price}
+                    onChange={(e) => handleInputChange("asking_price", Number.parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="mileage">Mileage (KM)</Label>
+                  <Label htmlFor="purchase_date">Purchase Date</Label>
+                  <Input
+                    id="purchase_date"
+                    type="date"
+                    value={formData.purchase_date}
+                    onChange={(e) => handleInputChange("purchase_date", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dealer_commission">Dealer Commission (%)</Label>
+                  <Input
+                    id="dealer_commission"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={formData.dealer_commission}
+                    onChange={(e) => handleInputChange("dealer_commission", Number.parseFloat(e.target.value) || 0)}
+                    placeholder="0.0"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Owner & Vehicle Details */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="w-5 h-5" />
+                Owner & Vehicle Details
+              </CardTitle>
+              <CardDescription>Enter owner information and vehicle specifications</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="owner_name">Owner Name *</Label>
+                  <Input
+                    id="owner_name"
+                    value={formData.owner_name}
+                    onChange={(e) => handleInputChange("owner_name", e.target.value)}
+                    placeholder="Enter owner's full name"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mileage">Mileage (km)</Label>
                   <Input
                     id="mileage"
                     type="number"
-                    value={carData.mileage}
-                    onChange={(e) => setCarData({ ...carData, mileage: e.target.value })}
-                    placeholder="50000"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="purchasePrice">Purchase Price (PKR)</Label>
-                  <Input
-                    id="purchasePrice"
-                    type="number"
-                    value={carData.purchasePrice}
-                    onChange={(e) => setCarData({ ...carData, purchasePrice: e.target.value })}
-                    placeholder="2500000"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="askingPrice">Asking Price (PKR)</Label>
-                  <Input
-                    id="askingPrice"
-                    type="number"
-                    value={carData.askingPrice}
-                    onChange={(e) => setCarData({ ...carData, askingPrice: e.target.value })}
-                    placeholder="2800000"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="purchaseDate">Purchase Date</Label>
-                  <Input
-                    id="purchaseDate"
-                    type="date"
-                    value={carData.purchaseDate}
-                    onChange={(e) => setCarData({ ...carData, purchaseDate: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ownerName">Owner Name</Label>
-                  <Input
-                    id="ownerName"
-                    value={carData.ownerName}
-                    onChange={(e) => setCarData({ ...carData, ownerName: e.target.value })}
-                    placeholder="Previous owner name"
-                    required
+                    min="0"
+                    value={formData.mileage}
+                    onChange={(e) => handleInputChange("mileage", Number.parseInt(e.target.value) || 0)}
+                    placeholder="0"
                   />
                 </div>
               </div>
@@ -411,156 +539,193 @@ Grade Scale:
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
-                  value={carData.description}
-                  onChange={(e) => setCarData({ ...carData, description: e.target.value })}
-                  placeholder="Additional details about the car..."
-                  rows={3}
+                  value={formData.description}
+                  onChange={(e) => handleInputChange("description", e.target.value)}
+                  placeholder="Enter additional details about the vehicle..."
+                  rows={4}
                 />
               </div>
             </CardContent>
           </Card>
 
-          {/* Dealer Information */}
+          {/* Images Upload */}
           <Card>
             <CardHeader>
-              <CardTitle>Dealer Information</CardTitle>
-              <CardDescription>Details about dealers involved in the transaction</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <ImageIcon className="w-5 h-5" />
+                Vehicle Images
+              </CardTitle>
+              <CardDescription>Upload photos of the vehicle (max 10 images, 5MB each)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="dealerName">Dealer Name</Label>
-                  <Input
-                    id="dealerName"
-                    value={carData.dealerName}
-                    onChange={(e) => setCarData({ ...carData, dealerName: e.target.value })}
-                    placeholder="Dealer involved in purchase/sale"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="dealerCommission">Dealer Commission (PKR)</Label>
-                  <Input
-                    id="dealerCommission"
-                    type="number"
-                    value={carData.dealerCommission}
-                    onChange={(e) => setCarData({ ...carData, dealerCommission: e.target.value })}
-                    placeholder="50000"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Images and Documents */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Images and Documents</CardTitle>
-              <CardDescription>Upload car images and related documents</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Upload Progress */}
-              {(uploading || isSubmitting) && (
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>{uploading ? "Uploading files..." : "Creating car profile..."}</span>
-                    <span>{Math.round(uploadProgress)}%</span>
-                  </div>
-                  <Progress value={uploadProgress} className="w-full" />
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <Label>Car Images</Label>
-                <div className="flex gap-4">
-                  <div className="flex-1">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                <div className="text-center">
+                  <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
+                  <div className="mt-4">
+                    <Label htmlFor="images" className="cursor-pointer">
+                      <span className="mt-2 block text-sm font-medium text-gray-900">Click to upload images</span>
+                      <span className="mt-1 block text-sm text-gray-500">PNG, JPG, WEBP up to 5MB each</span>
+                    </Label>
                     <Input
+                      id="images"
                       type="file"
                       multiple
                       accept="image/*"
-                      onChange={handleImageUpload}
+                      onChange={handleImageSelect}
                       className="hidden"
-                      id="image-upload"
-                      disabled={uploading || isSubmitting}
                     />
-                    <Label htmlFor="image-upload" className="cursor-pointer">
-                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400">
-                        <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                        <p className="text-sm text-gray-600">Click to upload images</p>
-                      </div>
-                    </Label>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="px-8 bg-transparent"
-                    disabled={uploading || isSubmitting}
-                  >
-                    <Camera className="w-4 h-4 mr-2" />
-                    Take Photo
-                  </Button>
                 </div>
+              </div>
 
-                {/* Image Previews */}
-                {imagePreviews.length > 0 && (
+              {selectedImages.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Selected Images:</h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {imagePreviews.map((preview, index) => (
+                    {selectedImages.map((file, index) => (
                       <div key={index} className="relative">
-                        <img
-                          src={preview || "/placeholder.svg"}
-                          alt={`Preview ${index + 1}`}
-                          className="w-full h-24 object-cover rounded-lg"
-                        />
+                        <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                          {imagePreviews[index] ? (
+                            <img
+                              src={imagePreviews[index] || "/placeholder.svg"}
+                              alt={`Preview ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <ImageIcon className="w-8 h-8 text-gray-400" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-600 truncate">{file.name}</div>
                         <Button
                           type="button"
                           variant="destructive"
                           size="sm"
                           className="absolute -top-2 -right-2 h-6 w-6 rounded-full p-0"
                           onClick={() => removeImage(index)}
-                          disabled={uploading || isSubmitting}
                         >
-                          <X className="h-3 w-3" />
+                          <X className="w-3 h-3" />
                         </Button>
                       </div>
                     ))}
                   </div>
-                )}
+                </div>
+              )}
+
+              {imageUpload.uploads.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Upload Progress:</h4>
+                  {imageUpload.uploads.map((upload, index) => (
+                    <div key={index} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="truncate">{upload.file.name}</span>
+                        <span
+                          className={`px-2 py-1 rounded text-xs ${
+                            upload.status === "completed"
+                              ? "bg-green-100 text-green-800"
+                              : upload.status === "error"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {upload.status}
+                        </span>
+                      </div>
+                      <Progress value={upload.progress} className="h-2" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Documents Upload */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                Vehicle Documents
+              </CardTitle>
+              <CardDescription>Upload vehicle documents (max 5 files, 10MB each)</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                <div className="text-center">
+                  <FileText className="mx-auto h-12 w-12 text-gray-400" />
+                  <div className="mt-4">
+                    <Label htmlFor="documents" className="cursor-pointer">
+                      <span className="mt-2 block text-sm font-medium text-gray-900">Click to upload documents</span>
+                      <span className="mt-1 block text-sm text-gray-500">PDF, JPG, PNG up to 10MB each</span>
+                    </Label>
+                    <Input
+                      id="documents"
+                      type="file"
+                      multiple
+                      accept=".pdf,image/*"
+                      onChange={handleDocumentSelect}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-4">
-                <Label>Documents (Registration, etc.)</Label>
-                <Input
-                  type="file"
-                  multiple
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={handleDocumentUpload}
-                  disabled={uploading || isSubmitting}
-                />
-                {documents.length > 0 && (
+              {selectedDocuments.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Selected Documents:</h4>
                   <div className="space-y-2">
-                    {documents.map((doc, index) => (
-                      <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                        <span className="text-sm">{doc.name}</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeDocument(index)}
-                          disabled={uploading || isSubmitting}
-                        >
-                          <X className="h-4 w-4" />
+                    {selectedDocuments.map((file, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <FileText className="w-5 h-5 text-gray-400" />
+                          <div>
+                            <div className="text-sm font-medium truncate">{file.name}</div>
+                            <div className="text-xs text-gray-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</div>
+                          </div>
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => removeDocument(index)}>
+                          <X className="w-4 h-4" />
                         </Button>
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {documentUpload.uploads.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Upload Progress:</h4>
+                  {documentUpload.uploads.map((upload, index) => (
+                    <div key={index} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="truncate">{upload.file.name}</span>
+                        <span
+                          className={`px-2 py-1 rounded text-xs ${
+                            upload.status === "completed"
+                              ? "bg-green-100 text-green-800"
+                              : upload.status === "error"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {upload.status}
+                        </span>
+                      </div>
+                      <Progress value={upload.progress} className="h-2" />
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
           {/* Car Condition & Auction Sheet */}
           <Card>
             <CardHeader>
-              <CardTitle>Car Condition Assessment & Auction Sheet</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Car className="w-5 h-5" />
+                Car Condition Assessment & Auction Sheet
+              </CardTitle>
               <CardDescription>
                 Mark which parts are painted. Unticked parts are considered genuine. More genuine parts = higher grade.
               </CardDescription>
@@ -584,7 +749,7 @@ Grade Scale:
                       id={key}
                       checked={carCondition[key as keyof CarCondition]}
                       onCheckedChange={(checked) => setCarCondition({ ...carCondition, [key]: checked as boolean })}
-                      disabled={isSubmitting}
+                      disabled={loading}
                     />
                     <Label htmlFor={key} className="text-sm font-medium">
                       {label}
@@ -619,11 +784,11 @@ Grade Scale:
               </div>
 
               <div className="flex gap-4">
-                <Button type="button" variant="outline" onClick={generateAuctionSheet} disabled={isSubmitting}>
+                <Button type="button" variant="outline" onClick={generateAuctionSheet} disabled={loading}>
                   <FileText className="w-4 h-4 mr-2" />
                   Generate Auction Sheet
                 </Button>
-                <Button type="button" variant="outline" disabled={isSubmitting}>
+                <Button type="button" variant="outline" disabled={loading}>
                   <Download className="w-4 h-4 mr-2" />
                   Download PDF
                 </Button>
@@ -632,17 +797,22 @@ Grade Scale:
           </Card>
 
           {/* Submit Button */}
-          <div className="flex justify-end gap-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => (window.location.href = "/dashboard")}
-              disabled={isSubmitting}
-            >
+          <div className="flex justify-end space-x-4">
+            <Button type="button" variant="outline" onClick={() => router.push("/dashboard")} disabled={loading}>
               Cancel
             </Button>
-            <Button type="submit" disabled={uploading || isSubmitting}>
-              {isSubmitting ? "Creating Car Profile..." : "Add Car to Inventory"}
+            <Button type="submit" disabled={loading || imageUpload.isUploading || documentUpload.isUploading}>
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Adding Car...
+                </>
+              ) : (
+                <>
+                  <Car className="w-4 h-4 mr-2" />
+                  Add Car to Inventory
+                </>
+              )}
             </Button>
           </div>
         </form>
