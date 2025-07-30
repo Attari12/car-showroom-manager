@@ -115,47 +115,239 @@ export default function CarDetailPage({ params }: { params: { id: string } }) {
   }
 
   const generateAuctionSheetPDF = () => {
+    if (!car) {
+      alert("Car data not available for auction sheet generation.")
+      return
+    }
+
+    // Create HTML content for better PDF generation
     const auctionSheetContent = `
-🚗 AUCTION SHEET
-================
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Auction Sheet - ${car.make} ${car.model}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; color: #333; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { color: #2563eb; margin-bottom: 5px; }
+        .header p { color: #666; margin: 0; }
+        .section { margin-bottom: 25px; }
+        .section h2 { color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; }
+        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .detail-item { margin-bottom: 10px; }
+        .detail-label { font-weight: bold; color: #555; }
+        .detail-value { margin-left: 10px; }
+        .highlight { background-color: #f3f4f6; padding: 15px; border-radius: 8px; }
+        .status { display: inline-block; padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .status.available { background-color: #10b981; color: white; }
+        .status.sold { background-color: #6b7280; color: white; }
+        .footer { margin-top: 40px; text-align: center; color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚗 AUCTION SHEET</h1>
+        <p>Vehicle Information & Documentation</p>
+    </div>
 
-Car Details:
-• Make & Model: ${car.make} ${car.model} ${car.year}
-• Registration: ${car.registration_number}
-• Mileage: ${car.mileage.toLocaleString()} km
-• Owner: ${car.owner_name}
-• Purchase Date: ${car.purchase_date}
-• Purchase Price: ${formatCurrency(car.purchase_price)}
-• Asking Price: ${formatCurrency(car.asking_price)}
-• Status: ${car.status}
+    <div class="section">
+        <h2>Vehicle Details</h2>
+        <div class="details-grid">
+            <div>
+                <div class="detail-item">
+                    <span class="detail-label">Make & Model:</span>
+                    <span class="detail-value">${car.make} ${car.model} ${car.year}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Registration:</span>
+                    <span class="detail-value">${car.registration_number}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Mileage:</span>
+                    <span class="detail-value">${car.mileage.toLocaleString()} km</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Previous Owner:</span>
+                    <span class="detail-value">${car.owner_name}</span>
+                </div>
+            </div>
+            <div>
+                <div class="detail-item">
+                    <span class="detail-label">Purchase Date:</span>
+                    <span class="detail-value">${car.purchase_date}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Purchase Price:</span>
+                    <span class="detail-value">${formatCurrency(car.purchase_price)}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Asking Price:</span>
+                    <span class="detail-value">${formatCurrency(car.asking_price)}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value">
+                        <span class="status ${car.status}">${car.status.toUpperCase()}</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
 
-${
-  car.status === "sold"
-    ? `
-Sale Information:
-• Sold Price: ${formatCurrency(car.asking_price)}
-• Profit: ${formatCurrency(calculateProfit())}
-• Commission: ${formatCurrency(car.dealer_commission || 0)}
+    ${car.status === "sold" ? `
+    <div class="section">
+        <h2>Sale Information</h2>
+        <div class="highlight">
+            <div class="detail-item">
+                <span class="detail-label">Sold Price:</span>
+                <span class="detail-value">${formatCurrency(car.asking_price)}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">Profit:</span>
+                <span class="detail-value" style="color: #10b981; font-weight: bold;">${formatCurrency(calculateProfit())}</span>
+            </div>
+            ${car.dealer_commission ? `
+            <div class="detail-item">
+                <span class="detail-label">Dealer Commission:</span>
+                <span class="detail-value">${formatCurrency(car.dealer_commission)}</span>
+            </div>
+            ` : ''}
+        </div>
+    </div>
+    ` : ''}
+
+    ${car.auction_sheet ? `
+    <div class="section">
+        <h2>Car Condition Assessment</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <div class="highlight" style="text-align: center;">
+                <h3 style="margin: 0; color: #2563eb;">Overall Grade</h3>
+                <div style="font-size: 24px; font-weight: bold; color: #2563eb; margin: 10px 0;">
+                    ${(() => {
+                      const totalParts = Object.keys(car.auction_sheet).length
+                      const paintedParts = Object.values(car.auction_sheet).filter(Boolean).length
+                      const genuinePercentage = ((totalParts - paintedParts) / totalParts) * 100
+                      if (genuinePercentage >= 90) return "5/5"
+                      if (genuinePercentage >= 80) return "4/5"
+                      if (genuinePercentage >= 60) return "3/5"
+                      if (genuinePercentage >= 40) return "2/5"
+                      return "1/5"
+                    })()}
+                </div>
+                <p style="margin: 0; font-size: 12px; color: #666;">
+                    ${(() => {
+                      const totalParts = Object.keys(car.auction_sheet).length
+                      const paintedParts = Object.values(car.auction_sheet).filter(Boolean).length
+                      const genuinePercentage = ((totalParts - paintedParts) / totalParts) * 100
+                      if (genuinePercentage >= 90) return "Excellent"
+                      if (genuinePercentage >= 80) return "Very Good"
+                      if (genuinePercentage >= 60) return "Good"
+                      if (genuinePercentage >= 40) return "Fair"
+                      return "Poor"
+                    })()}
+                </p>
+            </div>
+            <div class="highlight" style="text-align: center;">
+                <h3 style="margin: 0; color: #10b981;">Genuine Parts</h3>
+                <div style="font-size: 24px; font-weight: bold; color: #10b981; margin: 10px 0;">
+                    ${Object.keys(car.auction_sheet).length - Object.values(car.auction_sheet).filter(Boolean).length}
+                </div>
+                <p style="margin: 0; font-size: 12px; color: #666;">out of ${Object.keys(car.auction_sheet).length} total</p>
+            </div>
+            <div class="highlight" style="text-align: center;">
+                <h3 style="margin: 0; color: #ef4444;">Painted Parts</h3>
+                <div style="font-size: 24px; font-weight: bold; color: #ef4444; margin: 10px 0;">
+                    ${Object.values(car.auction_sheet).filter(Boolean).length}
+                </div>
+                <p style="margin: 0; font-size: 12px; color: #666;">require attention</p>
+            </div>
+        </div>
+
+        <h3>Parts Condition Details</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+            <thead>
+                <tr style="background-color: #f3f4f6;">
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Part</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">Condition</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${Object.entries(car.auction_sheet).map(([part, isPainted]) => {
+                  const partLabels = {
+                    trunk: "Trunk",
+                    pillars: "Pillars",
+                    hood: "Hood",
+                    roof: "Roof",
+                    frontLeftDoor: "Front Left Door",
+                    frontRightDoor: "Front Right Door",
+                    backLeftDoor: "Back Left Door",
+                    backRightDoor: "Back Right Door",
+                    frontRightFender: "Front Right Fender",
+                    frontLeftFender: "Front Left Fender",
+                    backRightFender: "Back Right Fender",
+                    backLeftFender: "Back Left Fender",
+                  }
+                  return `
+                    <tr>
+                        <td style="border: 1px solid #d1d5db; padding: 8px;">${partLabels[part] || part}</td>
+                        <td style="border: 1px solid #d1d5db; padding: 8px; text-align: center; color: ${isPainted ? '#ef4444' : '#10b981'}; font-weight: bold;">
+                            ${isPainted ? 'Painted' : 'Genuine'}
+                        </td>
+                        <td style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">
+                            <span style="padding: 4px 8px; border-radius: 12px; font-size: 12px; color: white; background-color: ${isPainted ? '#ef4444' : '#10b981'};">
+                                ${isPainted ? 'P' : 'G'}
+                            </span>
+                        </td>
+                    </tr>
+                  `
+                }).join('')}
+            </tbody>
+        </table>
+    </div>
+    ` : ''}
+
+    ${car.description ? `
+    <div class="section">
+        <h2>Description</h2>
+        <div class="highlight">
+            <p>${car.description}</p>
+        </div>
+    </div>
+    ` : ''}
+
+    <div class="footer">
+        <p>Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+        <p>Car Inventory Management System</p>
+    </div>
+</body>
+</html>
 `
-    : ""
-}
 
-Description:
-${car.description || "No description available"}
-
-Generated on: ${new Date().toLocaleDateString()}
-`
-
-    // Create a blob with the content
-    const blob = new Blob([auctionSheetContent], { type: "text/plain" })
+    // Create HTML blob and open in new tab for PDF generation
+    const blob = new Blob([auctionSheetContent], { type: "text/html" })
     const url = window.URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = `auction-sheet-${car.make}-${car.model}-${car.registration_number}.txt`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
+
+    // Open in new tab so user can print as PDF
+    const printWindow = window.open(url, '_blank')
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print()
+          window.URL.revokeObjectURL(url)
+        }, 500)
+      }
+    } else {
+      // Fallback: download as HTML file
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `auction-sheet-${car.make}-${car.model}-${car.registration_number}.html`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    }
   }
 
   const shareImageOnWhatsApp = (imageUrl: string, imageName: string) => {
@@ -173,24 +365,130 @@ Generated on: ${new Date().toLocaleDateString()}
 
   const downloadFile = async (url: string, filename: string) => {
     try {
-      const response = await fetch(url)
-      const blob = await response.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = downloadUrl
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(downloadUrl)
+      // Check if URL is valid
+      if (!url || url === "/placeholder.svg") {
+        alert("File not available for download.")
+        return
+      }
+
+      // Show loading state
+      const loadingToast = document.createElement("div")
+      loadingToast.className = "fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded shadow-lg z-50"
+      loadingToast.textContent = "Downloading file..."
+      document.body.appendChild(loadingToast)
+
+      // Try direct download first (works for most Supabase storage URLs)
+      try {
+        const response = await fetch(url)
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = downloadUrl
+        link.download = filename
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+
+        // Remove loading toast and show success
+        document.body.removeChild(loadingToast)
+        const successToast = document.createElement("div")
+        successToast.className = "fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg z-50"
+        successToast.textContent = "File downloaded successfully!"
+        document.body.appendChild(successToast)
+        setTimeout(() => {
+          if (document.body.contains(successToast)) {
+            document.body.removeChild(successToast)
+          }
+        }, 3000)
+      } catch (fetchError) {
+        console.warn("Fetch download failed, trying alternative method:", fetchError)
+
+        // Fallback: Direct link download (works for public URLs)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = filename
+        link.target = "_blank"
+        link.rel = "noopener noreferrer"
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+
+        // Remove loading toast and show success
+        document.body.removeChild(loadingToast)
+        const successToast = document.createElement("div")
+        successToast.className = "fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg z-50"
+        successToast.textContent = "Download initiated!"
+        document.body.appendChild(successToast)
+        setTimeout(() => {
+          if (document.body.contains(successToast)) {
+            document.body.removeChild(successToast)
+          }
+        }, 3000)
+      }
     } catch (error) {
       console.error("Error downloading file:", error)
-      alert("Error downloading file. Please try again.")
+
+      // Remove loading toast if present
+      const loadingToast = document.querySelector('.fixed.top-4.right-4.bg-blue-500')
+      if (loadingToast && document.body.contains(loadingToast)) {
+        document.body.removeChild(loadingToast)
+      }
+
+      // Show error message
+      const errorToast = document.createElement("div")
+      errorToast.className = "fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded shadow-lg z-50"
+      errorToast.textContent = "Error downloading file. Please try again."
+      document.body.appendChild(errorToast)
+      setTimeout(() => {
+        if (document.body.contains(errorToast)) {
+          document.body.removeChild(errorToast)
+        }
+      }, 3000)
     }
   }
 
-  const viewFile = (url: string) => {
-    window.open(url, "_blank")
+  const viewFile = (url: string, filename?: string) => {
+    try {
+      // Check if URL is valid
+      if (!url || url === "/placeholder.svg") {
+        alert("File not available for viewing.")
+        return
+      }
+
+      // Get file extension to determine how to handle the file
+      const fileExtension = filename ? filename.split('.').pop()?.toLowerCase() : ''
+
+      // Handle different file types
+      if (fileExtension && ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension)) {
+        // These files can be viewed directly in browser
+        const newWindow = window.open(url, "_blank")
+        if (!newWindow) {
+          // Popup blocked, try alternative method
+          const link = document.createElement("a")
+          link.href = url
+          link.target = "_blank"
+          link.rel = "noopener noreferrer"
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+        }
+      } else {
+        // For other file types, offer to download instead
+        if (confirm(`This file type (${fileExtension || 'unknown'}) cannot be previewed in browser. Would you like to download it instead?`)) {
+          downloadFile(url, filename || 'document')
+        }
+      }
+    } catch (error) {
+      console.error("Error viewing file:", error)
+      alert("Error opening file. Please try again.")
+    }
   }
 
   return (
@@ -407,7 +705,7 @@ Generated on: ${new Date().toLocaleDateString()}
                               src={imageUrl || "/placeholder.svg"}
                               alt={`Car image ${index + 1}`}
                               className="w-full h-full object-cover cursor-pointer"
-                              onClick={() => viewFile(imageUrl)}
+                              onClick={() => viewFile(imageUrl, `car-image-${index + 1}.jpg`)}
                             />
                           </div>
                           <CardContent className="p-4">
@@ -475,7 +773,7 @@ Generated on: ${new Date().toLocaleDateString()}
                                 </div>
                               </div>
                               <div className="flex gap-2">
-                                <Button variant="outline" size="sm" onClick={() => viewFile(docUrl)}>
+                                <Button variant="outline" size="sm" onClick={() => viewFile(docUrl, docName)}>
                                   <FileText className="w-4 h-4 mr-1" />
                                   View
                                 </Button>
@@ -512,88 +810,169 @@ Generated on: ${new Date().toLocaleDateString()}
           <TabsContent value="condition">
             <Card>
               <CardHeader>
-                <CardTitle>Auction Sheet & Car Information</CardTitle>
-                <CardDescription>Detailed car information and documentation</CardDescription>
+                <CardTitle>Car Condition Assessment & Auction Sheet</CardTitle>
+                <CardDescription>Detailed condition assessment captured during car evaluation</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Car Summary */}
-                <div className="bg-gray-50 p-6 rounded-lg">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
-                    <div>
-                      <p className="text-3xl font-bold text-blue-600">{car.year}</p>
-                      <p className="text-sm text-gray-600">Model Year</p>
+                {/* Auction Sheet Data */}
+                {car.auction_sheet ? (
+                  <>
+                    {/* Grading Summary */}
+                    <div className="bg-gradient-to-r from-blue-50 to-green-50 p-6 rounded-lg border border-blue-200">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Overall Assessment</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="text-center">
+                          <div className="text-3xl font-bold text-blue-600 mb-1">
+                            {(() => {
+                              const totalParts = Object.keys(car.auction_sheet).length
+                              const paintedParts = Object.values(car.auction_sheet).filter(Boolean).length
+                              const genuinePercentage = ((totalParts - paintedParts) / totalParts) * 100
+                              if (genuinePercentage >= 90) return "5"
+                              if (genuinePercentage >= 80) return "4"
+                              if (genuinePercentage >= 60) return "3"
+                              if (genuinePercentage >= 40) return "2"
+                              return "1"
+                            })()}/5
+                          </div>
+                          <p className="text-sm font-medium text-gray-700">Overall Grade</p>
+                          <p className="text-xs text-gray-500">
+                            {(() => {
+                              const totalParts = Object.keys(car.auction_sheet).length
+                              const paintedParts = Object.values(car.auction_sheet).filter(Boolean).length
+                              const genuinePercentage = ((totalParts - paintedParts) / totalParts) * 100
+                              if (genuinePercentage >= 90) return "Excellent"
+                              if (genuinePercentage >= 80) return "Very Good"
+                              if (genuinePercentage >= 60) return "Good"
+                              if (genuinePercentage >= 40) return "Fair"
+                              return "Poor"
+                            })()}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-3xl font-bold text-green-600 mb-1">
+                            {Object.keys(car.auction_sheet).length - Object.values(car.auction_sheet).filter(Boolean).length}
+                          </div>
+                          <p className="text-sm font-medium text-gray-700">Genuine Parts</p>
+                          <p className="text-xs text-gray-500">
+                            out of {Object.keys(car.auction_sheet).length} total
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-3xl font-bold text-red-600 mb-1">
+                            {Object.values(car.auction_sheet).filter(Boolean).length}
+                          </div>
+                          <p className="text-sm font-medium text-gray-700">Painted Parts</p>
+                          <p className="text-xs text-gray-500">
+                            require attention
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-3xl font-bold text-green-600">{car.mileage.toLocaleString()}</p>
-                      <p className="text-sm text-gray-600">KM Mileage</p>
-                    </div>
-                    <div>
-                      <p className="text-3xl font-bold text-purple-600">{formatCurrency(car.purchase_price)}</p>
-                      <p className="text-sm text-gray-600">Purchase Price</p>
-                    </div>
-                    <div>
-                      <p className="text-3xl font-bold text-orange-600">{formatCurrency(car.asking_price)}</p>
-                      <p className="text-sm text-gray-600">Asking Price</p>
-                    </div>
-                  </div>
-                </div>
 
-                {/* Car Information */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h4 className="font-medium text-gray-900">Basic Information</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Make & Model:</span>
-                        <span className="font-medium">
-                          {car.make} {car.model}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Registration:</span>
-                        <span className="font-medium">{car.registration_number}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Previous Owner:</span>
-                        <span className="font-medium">{car.owner_name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Purchase Date:</span>
-                        <span className="font-medium">{car.purchase_date}</span>
+                    {/* Grading System Legend */}
+                    <div className="bg-gray-50 p-4 rounded-lg border">
+                      <h4 className="font-medium text-gray-900 mb-3">Grading System Reference</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-sm">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-4 bg-green-500 rounded"></div>
+                          <span>Grade 5 - Excellent (90-100%)</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-4 bg-green-400 rounded"></div>
+                          <span>Grade 4 - Very Good (80-89%)</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-4 bg-yellow-400 rounded"></div>
+                          <span>Grade 3 - Good (60-79%)</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-4 bg-orange-400 rounded"></div>
+                          <span>Grade 2 - Fair (40-59%)</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-4 bg-red-500 rounded"></div>
+                          <span>Grade 1 - Poor (0-39%)</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="space-y-4">
-                    <h4 className="font-medium text-gray-900">Financial Information</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Purchase Price:</span>
-                        <span className="font-medium">{formatCurrency(car.purchase_price)}</span>
+
+                    {/* Parts Condition Grid */}
+                    <div>
+                      <h4 className="font-medium text-gray-900 mb-4">Parts Condition Assessment</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {Object.entries(car.auction_sheet).map(([part, isPainted]) => {
+                          const partLabels: Record<string, string> = {
+                            trunk: "Trunk",
+                            pillars: "Pillars",
+                            hood: "Hood",
+                            roof: "Roof",
+                            frontLeftDoor: "Front Left Door",
+                            frontRightDoor: "Front Right Door",
+                            backLeftDoor: "Back Left Door",
+                            backRightDoor: "Back Right Door",
+                            frontRightFender: "Front Right Fender",
+                            frontLeftFender: "Front Left Fender",
+                            backRightFender: "Back Right Fender",
+                            backLeftFender: "Back Left Fender",
+                          }
+
+                          return (
+                            <div
+                              key={part}
+                              className={`p-4 rounded-lg border-2 transition-all ${
+                                isPainted
+                                  ? "bg-red-50 border-red-200 text-red-800"
+                                  : "bg-green-50 border-green-200 text-green-800"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-sm">{partLabels[part]}</span>
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
+                                  isPainted ? "bg-red-500" : "bg-green-500"
+                                }`}>
+                                  {isPainted ? "P" : "G"}
+                                </div>
+                              </div>
+                              <div className="text-xs mt-1 font-medium">
+                                {isPainted ? "Painted" : "Genuine"}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Asking Price:</span>
-                        <span className="font-medium">{formatCurrency(car.asking_price)}</span>
-                      </div>
-                      {car.dealer_commission && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Dealer Commission:</span>
-                          <span className="font-medium">{formatCurrency(car.dealer_commission)}</span>
-                        </div>
-                      )}
-                      {car.status === "sold" && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Profit:</span>
-                          <span className="font-medium text-green-600">{formatCurrency(calculateProfit())}</span>
-                        </div>
-                      )}
                     </div>
+
+                    {/* Car Summary */}
+                    <div className="bg-gray-50 p-6 rounded-lg">
+                      <h4 className="font-medium text-gray-900 mb-4">Vehicle Summary</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                        <div>
+                          <p className="text-2xl font-bold text-blue-600">{car.year}</p>
+                          <p className="text-sm text-gray-600">Model Year</p>
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-green-600">{car.mileage.toLocaleString()}</p>
+                          <p className="text-sm text-gray-600">KM Mileage</p>
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-orange-600">{formatCurrency(car.asking_price)}</p>
+                          <p className="text-sm text-gray-600">Asking Price</p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-12">
+                    <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Auction Sheet Data</h3>
+                    <p className="text-gray-600">Auction sheet data was not captured when this car was added.</p>
                   </div>
-                </div>
+                )}
 
                 <div className="flex gap-4">
                   <Button variant="outline" className="flex-1 bg-transparent" onClick={generateAuctionSheetPDF}>
                     <Download className="w-4 h-4 mr-2" />
-                    Download Auction Sheet
+                    Download Auction Sheet as PDF
                   </Button>
                   <Button
                     variant="outline"

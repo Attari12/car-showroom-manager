@@ -277,12 +277,20 @@ Grade Scale:
         description: formData.description || undefined,
         images: imageUrls,
         documents: documentUrls,
+        auction_sheet: carCondition,
       }
+
+      console.log("Submitting car data:", carData)
 
       const result = await createCar(carData)
 
-      if (result.error || !result.data) {
-        throw new Error("Failed to create car record")
+      if (result.error) {
+        console.error("CreateCar error:", result.error)
+        throw result.error
+      }
+
+      if (!result.data) {
+        throw new Error("No data returned from car creation")
       }
 
       setSuccess("Car added successfully!")
@@ -305,6 +313,20 @@ Grade Scale:
       setSelectedImages([])
       setSelectedDocuments([])
       setImagePreviews([])
+      setCarCondition({
+        trunk: false,
+        pillars: false,
+        hood: false,
+        roof: false,
+        frontLeftDoor: false,
+        frontRightDoor: false,
+        backLeftDoor: false,
+        backRightDoor: false,
+        frontRightFender: false,
+        frontLeftFender: false,
+        backRightFender: false,
+        backLeftFender: false,
+      })
       imageUpload.clearUploads()
       documentUpload.clearUploads()
 
@@ -485,13 +507,12 @@ Grade Scale:
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="dealer_commission">Dealer Commission (%)</Label>
+                  <Label htmlFor="dealer_commission">Dealer Commission </Label>
                   <Input
                     id="dealer_commission"
                     type="number"
                     min="0"
-                    max="100"
-                    step="0.1"
+                    step="0.01"
                     value={formData.dealer_commission}
                     onChange={(e) => handleInputChange("dealer_commission", Number.parseFloat(e.target.value) || 0)}
                     placeholder="0.0"

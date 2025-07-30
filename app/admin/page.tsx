@@ -1,20 +1,21 @@
 "use client"
 
+import type React from "react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { TableCell } from "@/components/ui/table"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Trash2, Edit, LogOut, Users, Key } from "lucide-react"
@@ -28,7 +29,18 @@ interface Client {
   passwordChanged?: boolean
 }
 
-export default function AdminDashboard() {
+// Mock functions - replace with actual service calls
+const updateClient = async (id: string, data: Partial<Client>) => {
+  // This would be your actual API call
+  return Promise.resolve()
+}
+
+const loadClients = async () => {
+  // This would be your actual API call to reload clients
+  return Promise.resolve()
+}
+
+const AdminPage = () => {
   // Add authentication check
   useEffect(() => {
     const userType = localStorage.getItem("userType")
@@ -61,6 +73,12 @@ export default function AdminDashboard() {
   const [editingClient, setEditingClient] = useState<Client | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [error, setError] = useState<string>("")
+  const [success, setSuccess] = useState<string>("")
+  const [isPasswordChangeOpen, setIsPasswordChangeOpen] = useState(false)
+  const [passwordChangeClient, setPasswordChangeClient] = useState<Client | null>(null)
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
 
   const handleAddClient = () => {
     if (newClient.username && newClient.password) {
@@ -77,8 +95,11 @@ export default function AdminDashboard() {
     }
   }
 
-  const handleDeleteClient = (id: string) => {
-    setClients(clients.filter((client) => client.id !== id))
+  const handleDeleteClient = async (id: string, username: string) => {
+    if (confirm(`Are you sure you want to delete client ${username}?`)) {
+      setClients(clients.filter((client) => client.id !== id))
+      setSuccess(`Client ${username} deleted successfully`)
+    }
   }
 
   const handleEditClient = () => {
@@ -86,6 +107,48 @@ export default function AdminDashboard() {
       setClients(clients.map((client) => (client.id === editingClient.id ? editingClient : client)))
       setEditingClient(null)
       setIsEditDialogOpen(false)
+    }
+  }
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!passwordChangeClient) return
+
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match")
+      return
+    }
+
+    if (newPassword.length < 6) {
+      setError("Password must be at least 6 characters long")
+      return
+    }
+
+    try {
+      setError("")
+      setSuccess("")
+
+      await updateClient(passwordChangeClient.id, {
+        password: newPassword,
+        passwordChanged: true,
+      })
+
+      // Update local state
+      setClients(clients.map(client => 
+        client.id === passwordChangeClient.id 
+          ? { ...client, password: newPassword, passwordChanged: true }
+          : client
+      ))
+
+      setSuccess(`Password updated successfully for ${passwordChangeClient.username}`)
+      setIsPasswordChangeOpen(false)
+      setPasswordChangeClient(null)
+      setNewPassword("")
+      setConfirmPassword("")
+      await loadClients()
+    } catch (error: any) {
+      console.error("Error updating password:", error)
+      setError(`Failed to update password: ${error.message}`)
     }
   }
 
@@ -124,6 +187,22 @@ export default function AdminDashboard() {
         </div>
       </header>
 
+      {/* Success/Error Messages */}
+      {error && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            {error}
+          </div>
+        </div>
+      )}
+      {success && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+            {success}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="clients" className="space-y-6">
           <TabsList>
@@ -140,12 +219,10 @@ export default function AdminDashboard() {
                     <CardDescription>Manage client accounts, passwords, and access</CardDescription>
                   </div>
                   <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Plus className="w-4 h-4 mr-2" />
-                        Add Client
-                      </Button>
-                    </DialogTrigger>
+                    <Button onClick={() => setIsAddDialogOpen(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Client
+                    </Button>
                     <DialogContent>
                       <DialogHeader>
                         <DialogTitle>Add New Client</DialogTitle>
@@ -220,12 +297,24 @@ export default function AdminDashboard() {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setPasswordChangeClient(client)
+                                setIsPasswordChangeOpen(true)
+                              }}
+                              title="Change Password"
+                            >
+                              <Key className="w-4 h-4" />
+                            </Button>
                             <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                              <DialogTrigger asChild>
-                                <Button variant="outline" size="sm" onClick={() => setEditingClient(client)}>
-                                  <Edit className="w-4 h-4" />
-                                </Button>
-                              </DialogTrigger>
+                              <Button variant="outline" size="sm" onClick={() => {
+                                setEditingClient(client)
+                                setIsEditDialogOpen(true)
+                              }}>
+                                <Edit className="w-4 h-4" />
+                              </Button>
                               <DialogContent>
                                 <DialogHeader>
                                   <DialogTitle>Edit Client</DialogTitle>
@@ -286,7 +375,7 @@ export default function AdminDashboard() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleDeleteClient(client.id)}
+                              onClick={() => handleDeleteClient(client.id, client.username)}
                               className="text-red-600 hover:text-red-700"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -312,29 +401,38 @@ export default function AdminDashboard() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Client</TableHead>
-                      <TableHead>Old Password</TableHead>
-                      <TableHead>New Password</TableHead>
-                      <TableHead>Changed Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Last Changed</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow>
-                      <TableCell>client001</TableCell>
-                      <TableCell>
-                        <code className="bg-gray-100 px-2 py-1 rounded text-sm">temp123</code>
-                      </TableCell>
-                      <TableCell>
-                        <code className="bg-gray-100 px-2 py-1 rounded text-sm">newpass456</code>
-                      </TableCell>
-                      <TableCell>2024-01-20</TableCell>
-                      <TableCell>
-                        <Button variant="outline" size="sm">
-                          <Key className="w-4 h-4 mr-2" />
-                          Reset Password
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                    {clients.map((client) => (
+                      <TableRow key={client.id}>
+                        <TableCell>{client.username}</TableCell>
+                        <TableCell>
+                          {client.passwordChanged ? (
+                            <Badge variant="secondary">Changed</Badge>
+                          ) : (
+                            <Badge variant="outline">Default</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>{client.passwordChanged ? client.lastLogin || "Unknown" : "Never"}</TableCell>
+                        <TableCell>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => {
+                              setPasswordChangeClient(client)
+                              setIsPasswordChangeOpen(true)
+                            }}
+                          >
+                            <Key className="w-4 h-4 mr-2" />
+                            Reset Password
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -342,6 +440,60 @@ export default function AdminDashboard() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Password Change Dialog */}
+      <Dialog open={isPasswordChangeOpen} onOpenChange={setIsPasswordChangeOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+            <DialogDescription>Change password for client: {passwordChangeClient?.username}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handlePasswordChange} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password</Label>
+              <Input
+                id="new-password"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+                required
+                minLength={6}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                required
+                minLength={6}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsPasswordChangeOpen(false)
+                  setPasswordChangeClient(null)
+                  setNewPassword("")
+                  setConfirmPassword("")
+                  setError("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit">Change Password</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
+
+export default AdminPage

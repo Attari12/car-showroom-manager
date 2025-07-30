@@ -8,28 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Car, DollarSign, Calendar, FileText, Eye } from "lucide-react"
-import { getBuyers, getCars, type Buyer as SupaBuyer, type Car as CarType } from "@/lib/supabase-client"
+import { getDealers, getCars, type Dealer as SupaDealer, type Car as CarType } from "@/lib/supabase-client"
 
-interface Buyer extends SupaBuyer {
+interface Dealer extends SupaDealer {
   // Additional computed fields
 }
 
-interface CarPurchase {
+interface DealerDebt {
   id: string
-  buyerId: string
-  carId: string
-  carMake: string
-  carModel: string
-  carYear: number
-  purchasePrice: number
-  soldPrice: number
-  purchaseDate: string
-  profit: number
-}
-
-interface Debt {
-  id: string
-  buyerId: string
+  dealerId: string
   amount: number
   type: "owed_to_client" | "owed_by_client"
   description: string
@@ -37,9 +24,9 @@ interface Debt {
   documents: string[]
 }
 
-export default function BuyerDetailPage({ params }: { params: { id: string } }) {
-  const [buyer, setBuyer] = useState<Buyer | null>(null)
-  const [purchasedCars, setPurchasedCars] = useState<CarType[]>([])
+export default function DealerDetailPage({ params }: { params: { id: string } }) {
+  const [dealer, setDealer] = useState<Dealer | null>(null)
+  const [dealtCars, setDealtCars] = useState<CarType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [clientId, setClientId] = useState<string>("")
@@ -48,48 +35,47 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
   useEffect(() => {
     const userType = localStorage.getItem("userType")
     const storedClientId = localStorage.getItem("clientId")
-
+    
     if (userType !== "client" || !storedClientId) {
       window.location.href = "/"
       return
     }
-
+    
     setClientId(storedClientId)
-    loadBuyerData(storedClientId)
+    loadDealerData(storedClientId)
   }, [])
 
-  const loadBuyerData = async (clientId: string) => {
+  const loadDealerData = async (clientId: string) => {
     try {
       setLoading(true)
       setError("")
-
-      // Load buyers and find the specific buyer
-      const buyers = await getBuyers(clientId)
-      const foundBuyer = buyers.find(b => b.id === params.id)
-
-      if (!foundBuyer) {
-        setError("Buyer not found")
+      
+      // Load dealers and find the specific dealer
+      const dealers = await getDealers(clientId)
+      const foundDealer = dealers.find(d => d.id === params.id)
+      
+      if (!foundDealer) {
+        setError("Dealer not found")
         return
       }
-
-      setBuyer(foundBuyer)
-
-      // Load cars and find cars purchased by this buyer
+      
+      setDealer(foundDealer)
+      
+      // Load cars and find cars dealt by this dealer
       const cars = await getCars(clientId)
-      const buyerCars = cars.filter(car => car.buyer_id === params.id && car.status === "sold")
-      setPurchasedCars(buyerCars)
-
+      const dealerCars = cars.filter(car => car.dealer_id === params.id)
+      setDealtCars(dealerCars)
+      
     } catch (error: any) {
-      console.error("Error loading buyer data:", error)
-      setError(`Failed to load buyer data: ${error.message}`)
+      console.error("Error loading dealer data:", error)
+      setError(`Failed to load dealer data: ${error.message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  const [carPurchases] = useState<CarPurchase[]>([])
-
-  const [debts] = useState<Debt[]>([])
+  // Debt data - would be loaded from database in real app when debt management is implemented
+  const [debts] = useState<DealerDebt[]>([])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-PK", {
@@ -99,11 +85,8 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
     }).format(amount)
   }
 
-  const totalPurchaseValue = purchasedCars.reduce((sum, car) => sum + car.asking_price, 0)
-  const totalProfit = purchasedCars.reduce((sum, car) => {
-    const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0)
-    return sum + profit
-  }, 0)
+  const totalCommission = dealtCars.reduce((sum, car) => sum + (car.dealer_commission || 0), 0)
+  const totalDealsValue = dealtCars.reduce((sum, car) => sum + car.asking_price, 0)
   const totalOwed = debts.filter((debt) => debt.type === "owed_to_client").reduce((sum, debt) => sum + debt.amount, 0)
   const totalAdvance = debts
     .filter((debt) => debt.type === "owed_by_client")
@@ -113,20 +96,20 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-2">Loading buyer details...</span>
+        <span className="ml-2">Loading dealer details...</span>
       </div>
     )
   }
 
-  if (error || !buyer) {
+  if (error || !dealer) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-bold mb-2">Error Loading Buyer</h2>
-          <p className="text-gray-600 mb-4">{error || "Buyer not found"}</p>
-          <Button onClick={() => window.location.href = "/dashboard/buyers"}>
+          <h2 className="text-xl font-bold mb-2">Error Loading Dealer</h2>
+          <p className="text-gray-600 mb-4">{error || "Dealer not found"}</p>
+          <Button onClick={() => window.location.href = "/dashboard/dealers"}>
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Buyers
+            Back to Dealers
           </Button>
         </div>
       </div>
@@ -139,41 +122,41 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center py-4">
-            <Button variant="ghost" onClick={() => (window.location.href = "/dashboard/buyers")} className="mr-4">
+            <Button variant="ghost" onClick={() => (window.location.href = "/dashboard/dealers")} className="mr-4">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Buyers
+              Back to Dealers
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{buyer.name}</h1>
-              <p className="text-sm text-gray-600">Buyer Profile & Purchase History</p>
+              <h1 className="text-2xl font-bold text-gray-900">{dealer.name}</h1>
+              <p className="text-sm text-gray-600">Dealer Profile & Deal History</p>
             </div>
           </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Buyer Info Card */}
+        {/* Dealer Info Card */}
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>Buyer Information</CardTitle>
+            <CardTitle>Dealer Information</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div>
-                <Label className="text-sm font-medium text-gray-500">Full Name</Label>
-                <p className="text-lg font-semibold">{buyer.name}</p>
+                <Label className="text-sm font-medium text-gray-500">Business Name</Label>
+                <p className="text-lg font-semibold">{dealer.name}</p>
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-500">CNIC</Label>
-                <p className="text-lg font-semibold">{buyer.cnic}</p>
+                <p className="text-lg font-semibold">{dealer.cnic}</p>
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-500">Contact</Label>
-                <p className="text-lg font-semibold">{buyer.phone}</p>
+                <p className="text-lg font-semibold">{dealer.phone}</p>
               </div>
               <div>
-                <Label className="text-sm font-medium text-gray-500">Customer Since</Label>
-                <p className="text-lg font-semibold">{buyer.created_at.split('T')[0]}</p>
+                <Label className="text-sm font-medium text-gray-500">Partner Since</Label>
+                <p className="text-lg font-semibold">{dealer.created_at.split('T')[0]}</p>
               </div>
             </div>
           </CardContent>
@@ -183,34 +166,34 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Cars Bought</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Deals</CardTitle>
               <Car className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{purchasedCars.length}</div>
-              <p className="text-xs text-muted-foreground">Cars purchased</p>
+              <div className="text-2xl font-bold">{dealtCars.length}</div>
+              <p className="text-xs text-muted-foreground">Cars dealt</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Purchase Value</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Deal Value</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalPurchaseValue)}</div>
-              <p className="text-xs text-muted-foreground">Total amount spent</p>
+              <div className="text-2xl font-bold">{formatCurrency(totalDealsValue)}</div>
+              <p className="text-xs text-muted-foreground">Total deals value</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">My Profit</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Commission</CardTitle>
               <Calendar className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">{formatCurrency(totalProfit)}</div>
-              <p className="text-xs text-muted-foreground">Profit from this buyer</p>
+              <div className="text-2xl font-bold text-green-600">{formatCurrency(totalCommission)}</div>
+              <p className="text-xs text-muted-foreground">Commission earned</p>
             </CardContent>
           </Card>
 
@@ -230,17 +213,17 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                {totalOwed > 0 ? "Amount owed" : totalAdvance > 0 ? "Advance given" : "No outstanding balance"}
+                {totalOwed > 0 ? "Commission owed" : totalAdvance > 0 ? "Advance given" : "No outstanding balance"}
               </p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Car Purchase History */}
+        {/* Car Deal History */}
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>Car Purchase History</CardTitle>
-            <CardDescription>Detailed list of all cars purchased by this buyer</CardDescription>
+            <CardTitle>Car Deal History</CardTitle>
+            <CardDescription>Detailed list of all cars dealt by this dealer</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -248,64 +231,67 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
                 <TableRow>
                   <TableHead>Car Details</TableHead>
                   <TableHead>Year</TableHead>
-                  <TableHead>Original Price</TableHead>
+                  <TableHead>Purchase Price</TableHead>
                   <TableHead>Sold Price</TableHead>
-                  <TableHead>My Profit</TableHead>
-                  <TableHead>Sale Date</TableHead>
+                  <TableHead>Commission</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Deal Date</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {purchasedCars.map((car) => {
-                  const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0)
-                  return (
-                    <TableRow key={car.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center">
-                            <Car className="w-5 h-5 text-gray-400" />
-                          </div>
-                          <div>
-                            <p className="font-medium">
-                              {car.make} {car.model}
-                            </p>
-                            <p className="text-sm text-gray-500">Reg: {car.registration_number}</p>
-                          </div>
+                {dealtCars.map((car) => (
+                  <TableRow key={car.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center">
+                          <Car className="w-5 h-5 text-gray-400" />
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{car.year}</Badge>
-                      </TableCell>
-                      <TableCell>{formatCurrency(car.purchase_price)}</TableCell>
-                      <TableCell className="font-medium">{formatCurrency(car.asking_price)}</TableCell>
-                      <TableCell>
-                        <span className="font-medium text-green-600">{formatCurrency(profit)}</span>
-                      </TableCell>
-                      <TableCell>{car.updated_at.split('T')[0]}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => window.location.href = `/dashboard/cars/${car.id}`}
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          View Details
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                        <div>
+                          <p className="font-medium">
+                            {car.make} {car.model}
+                          </p>
+                          <p className="text-sm text-gray-500">Reg: {car.registration_number}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{car.year}</Badge>
+                    </TableCell>
+                    <TableCell>{formatCurrency(car.purchase_price)}</TableCell>
+                    <TableCell className="font-medium">{formatCurrency(car.asking_price)}</TableCell>
+                    <TableCell>
+                      <span className="font-medium text-green-600">{formatCurrency(car.dealer_commission || 0)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={car.status === "sold" ? "secondary" : "default"}>
+                        {car.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{car.updated_at.split('T')[0]}</TableCell>
+                    <TableCell>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.location.href = `/dashboard/cars/${car.id}`}
+                      >
+                        <Eye className="w-4 h-4 mr-1" />
+                        View Details
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
 
-        {/* Debt History */}
+        {/* Commission History */}
         {debts.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>Payment History & Outstanding Debts</CardTitle>
-              <CardDescription>Track payments and outstanding amounts</CardDescription>
+              <CardTitle>Commission History & Outstanding Payments</CardTitle>
+              <CardDescription>Track commission payments and outstanding amounts</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -324,7 +310,7 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
                       <TableCell className="font-medium">{formatCurrency(debt.amount)}</TableCell>
                       <TableCell>
                         <Badge variant={debt.type === "owed_to_client" ? "destructive" : "secondary"}>
-                          {debt.type === "owed_to_client" ? "Owes to me" : "I owe"}
+                          {debt.type === "owed_to_client" ? "I owe dealer" : "Dealer owes me"}
                         </Badge>
                       </TableCell>
                       <TableCell>{debt.description}</TableCell>

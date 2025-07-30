@@ -38,6 +38,20 @@ export interface Car {
   documents?: string[]
   dealer_id?: string
   buyer_id?: string
+  auction_sheet?: {
+    trunk: boolean
+    pillars: boolean
+    hood: boolean
+    roof: boolean
+    frontLeftDoor: boolean
+    frontRightDoor: boolean
+    backLeftDoor: boolean
+    backRightDoor: boolean
+    frontRightFender: boolean
+    frontLeftFender: boolean
+    backRightFender: boolean
+    backLeftFender: boolean
+  } | null
   created_at: string
   updated_at: string
 }
@@ -224,7 +238,32 @@ export async function getCars(clientId: string) {
       console.error("Supabase error:", error)
       throw error
     }
-    return data || []
+
+    // Extract auction_sheet data from description field
+    const carsWithParsedAuctionSheet = (data || []).map(car => {
+      let auctionSheet = null
+      let cleanDescription = car.description || ""
+
+      // Extract auction sheet data from description
+      const auctionMatch = cleanDescription.match(/\[AUCTION_SHEET\](.*?)\[\/AUCTION_SHEET\]/s)
+      if (auctionMatch) {
+        try {
+          auctionSheet = JSON.parse(auctionMatch[1])
+          // Remove auction sheet data from description
+          cleanDescription = cleanDescription.replace(/\[AUCTION_SHEET\].*?\[\/AUCTION_SHEET\]/s, "").trim()
+        } catch (e) {
+          console.warn("Failed to parse auction sheet data:", e)
+        }
+      }
+
+      return {
+        ...car,
+        description: cleanDescription,
+        auction_sheet: auctionSheet
+      }
+    })
+
+    return carsWithParsedAuctionSheet
   } catch (error) {
     console.error("Error in getCars:", error)
     throw error
@@ -239,7 +278,30 @@ export async function getCarById(id: string) {
       console.error("Supabase error:", error)
       throw error
     }
-    return data
+
+    // Extract auction_sheet data from description field
+    let auctionSheet = null
+    let cleanDescription = data.description || ""
+
+    // Extract auction sheet data from description
+    const auctionMatch = cleanDescription.match(/\[AUCTION_SHEET\](.*?)\[\/AUCTION_SHEET\]/s)
+    if (auctionMatch) {
+      try {
+        auctionSheet = JSON.parse(auctionMatch[1])
+        // Remove auction sheet data from description
+        cleanDescription = cleanDescription.replace(/\[AUCTION_SHEET\].*?\[\/AUCTION_SHEET\]/s, "").trim()
+      } catch (e) {
+        console.warn("Failed to parse auction sheet data:", e)
+      }
+    }
+
+    const carWithParsedAuctionSheet = {
+      ...data,
+      description: cleanDescription,
+      auction_sheet: auctionSheet
+    }
+
+    return carWithParsedAuctionSheet
   } catch (error) {
     console.error("Error in getCarById:", error)
     throw error
@@ -248,38 +310,86 @@ export async function getCarById(id: string) {
 
 export async function createCar(car: Omit<Car, "id" | "created_at" | "updated_at">) {
   try {
+    // Prepare the car data for database insertion
+    // Store auction_sheet data in the description field as structured data
+    let enhancedDescription = car.description || ""
+
+    if (car.auction_sheet) {
+      const auctionData = `[AUCTION_SHEET]${JSON.stringify(car.auction_sheet)}[/AUCTION_SHEET]`
+      enhancedDescription = enhancedDescription ? `${enhancedDescription}\n\n${auctionData}` : auctionData
+    }
+
+    const carData = {
+      ...car,
+      images: car.images || [],
+      documents: car.documents || [],
+      description: enhancedDescription,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    // Remove auction_sheet from the data being sent to database
+    delete carData.auction_sheet
+
+    console.log("Attempting to create car with data:", carData)
+
     const { data, error } = await supabase
       .from("cars")
-      .insert([
-        {
-          ...car,
-          images: car.images || [],
-          documents: car.documents || [],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ])
+      .insert([carData])
       .select()
 
     if (error) {
-      console.error("Supabase error:", error)
-      throw error
+      console.error("Supabase error details:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
+      throw new Error(`Database error: ${error.message}`)
     }
+
+    console.log("Car created successfully:", data)
     return { data, error: null }
   } catch (error) {
     console.error("Error in createCar:", error)
-    return { data: null, error }
+    return { data: null, error: error instanceof Error ? error : new Error(String(error)) }
   }
 }
 
 export async function updateCar(id: string, updates: Partial<Car>) {
   try {
+    // Handle auction_sheet updates by embedding in description
+    let finalUpdates = { ...updates }
+
+    if (updates.auction_sheet !== undefined) {
+      // Get current car data to preserve existing description
+      const currentCar = await getCarById(id)
+      let enhancedDescription = updates.description !== undefined ? updates.description : (currentCar.description || "")
+
+      // Remove any existing auction sheet data
+      enhancedDescription = enhancedDescription.replace(/\[AUCTION_SHEET\].*?\[\/AUCTION_SHEET\]/s, "").trim()
+
+      // Add new auction sheet data if provided
+      if (updates.auction_sheet) {
+        const auctionData = `[AUCTION_SHEET]${JSON.stringify(updates.auction_sheet)}[/AUCTION_SHEET]`
+        enhancedDescription = enhancedDescription ? `${enhancedDescription}\n\n${auctionData}` : auctionData
+      }
+
+      finalUpdates = {
+        ...updates,
+        description: enhancedDescription,
+        updated_at: new Date().toISOString(),
+      }
+
+      // Remove auction_sheet from database updates
+      delete finalUpdates.auction_sheet
+    } else {
+      finalUpdates.updated_at = new Date().toISOString()
+    }
+
     const { data, error } = await supabase
       .from("cars")
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString(),
-      })
+      .update(finalUpdates)
       .eq("id", id)
       .select()
       .single()
@@ -288,7 +398,26 @@ export async function updateCar(id: string, updates: Partial<Car>) {
       console.error("Supabase error:", error)
       throw error
     }
-    return data
+
+    // Extract auction_sheet data from description field before returning
+    let auctionSheet = null
+    let cleanDescription = data.description || ""
+
+    const auctionMatch = cleanDescription.match(/\[AUCTION_SHEET\](.*?)\[\/AUCTION_SHEET\]/s)
+    if (auctionMatch) {
+      try {
+        auctionSheet = JSON.parse(auctionMatch[1])
+        cleanDescription = cleanDescription.replace(/\[AUCTION_SHEET\].*?\[\/AUCTION_SHEET\]/s, "").trim()
+      } catch (e) {
+        console.warn("Failed to parse auction sheet data:", e)
+      }
+    }
+
+    return {
+      ...data,
+      description: cleanDescription,
+      auction_sheet: auctionSheet
+    }
   } catch (error) {
     console.error("Error in updateCar:", error)
     throw error
@@ -442,6 +571,11 @@ export async function deleteFile(bucket: string, path: string) {
 // Update the getFileUrl function to handle different bucket types
 export function getFileUrl(bucket: string, path: string) {
   if (!path) return "/placeholder.svg"
+
+  // If the path is already a full URL, return it as is
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
 
   const { data } = supabase.storage.from(bucket).getPublicUrl(path)
   return data.publicUrl

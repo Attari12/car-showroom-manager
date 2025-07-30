@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, Plus, Edit, Trash2, FileText } from "lucide-react"
+import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye, Download } from "lucide-react"
+import { getDealers, getCars, createDealer, getFileUrl } from "@/lib/supabase-client"
 
 interface Dealer {
   id: string
@@ -56,90 +57,80 @@ interface CarDeal {
 }
 
 export default function DealersPage() {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [clientId, setClientId] = useState<string>("")
+
   // Authentication check
   useEffect(() => {
     const userType = localStorage.getItem("userType")
-    if (userType !== "client") {
+    const storedClientId = localStorage.getItem("clientId")
+
+    if (userType !== "client" || !storedClientId) {
       window.location.href = "/"
       return
     }
+
+    setClientId(storedClientId)
+    loadDealers(storedClientId)
   }, [])
 
-  const [dealers, setDealers] = useState<Dealer[]>([
-    {
-      id: "1",
-      name: "Kareem Motors",
-      cnic: "42101-1234567-1",
-      contactNumber: "+92-300-1234567",
-      createdAt: "2024-01-15",
-      totalDeals: 3,
-      totalCommission: 150000,
-    },
-    {
-      id: "2",
-      name: "City Auto Dealers",
-      cnic: "42101-9876543-2",
-      contactNumber: "+92-321-9876543",
-      createdAt: "2024-01-18",
-      totalDeals: 2,
-      totalCommission: 80000,
-    },
-  ])
+  const loadDealers = async (clientId: string) => {
+    try {
+      setLoading(true)
+      setError("")
 
-  const [dealerDebts, setDealerDebts] = useState<DealerDebt[]>([
-    {
-      id: "1",
-      dealerId: "1",
-      amount: 25000,
-      type: "owed_to_client",
-      description: "Pending commission payment for Toyota Corolla sale",
-      createdAt: "2024-01-20",
-      documents: [],
-      isSettled: false,
-    },
-    {
-      id: "2",
-      dealerId: "2",
-      amount: 15000,
-      type: "owed_by_client",
-      description: "Advance commission for upcoming deal",
-      createdAt: "2024-01-22",
-      documents: [],
-      isSettled: true,
-      settledDate: "2024-01-25",
-      settledAmount: 15000,
-    },
-  ])
+      // Load dealers and cars in parallel
+      const [dealersData, carsData] = await Promise.all([
+        getDealers(clientId),
+        getCars(clientId)
+      ])
 
-  const [carDeals, setCarDeals] = useState<CarDeal[]>([
-    {
-      id: "1",
-      dealerId: "1",
-      carMake: "Toyota",
-      carModel: "Corolla",
-      dealType: "sale",
-      commission: 50000,
-      date: "2024-01-18",
-    },
-    {
-      id: "2",
-      dealerId: "1",
-      carMake: "Honda",
-      carModel: "Civic",
-      dealType: "purchase",
-      commission: 30000,
-      date: "2024-01-12",
-    },
-    {
-      id: "3",
-      dealerId: "2",
-      carMake: "Suzuki",
-      carModel: "Alto",
-      dealType: "sale",
-      commission: 30000,
-      date: "2024-01-20",
-    },
-  ])
+      // Calculate deal statistics for each dealer
+      const transformedDealers: Dealer[] = dealersData.map(dealer => {
+        // Find cars dealt by this dealer
+        const dealerCars = carsData.filter(car => car.dealer_id === dealer.id)
+
+        // Calculate total deals and total commission
+        const totalDeals = dealerCars.length
+        const totalCommission = dealerCars.reduce((sum, car) => sum + (car.dealer_commission || 0), 0)
+
+        return {
+          ...dealer,
+          totalDeals,
+          totalCommission,
+        }
+      })
+
+      // Also update car deals data for the deals tab
+      const allCarDeals: CarDeal[] = carsData
+        .filter(car => car.dealer_id)
+        .map(car => ({
+          id: car.id,
+          dealerId: car.dealer_id!,
+          carMake: car.make,
+          carModel: car.model,
+          dealType: car.status === "sold" ? "sale" : "purchase",
+          commission: car.dealer_commission || 0,
+          date: car.updated_at.split('T')[0],
+        }))
+
+      setDealers(transformedDealers)
+      setCarDeals(allCarDeals)
+    } catch (error: any) {
+      console.error("Error loading dealers:", error)
+      setError(`Failed to load dealers: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const [dealers, setDealers] = useState<Dealer[]>([])
+
+  const [dealerDebts, setDealerDebts] = useState<DealerDebt[]>([])
+
+  const [carDeals, setCarDeals] = useState<CarDeal[]>([])
 
   const [newDealer, setNewDealer] = useState({
     name: "",
@@ -215,20 +206,30 @@ export default function DealersPage() {
     )
   })
 
-  const handleAddDealer = () => {
+  const handleAddDealer = async () => {
     if (newDealer.name && newDealer.cnic && newDealer.contactNumber) {
-      const dealer: Dealer = {
-        id: Date.now().toString(),
-        name: newDealer.name,
-        cnic: newDealer.cnic,
-        contactNumber: newDealer.contactNumber,
-        createdAt: new Date().toISOString().split("T")[0],
-        totalDeals: 0,
-        totalCommission: 0,
+      try {
+        setError("")
+        setSuccess("")
+
+        const dealer = await createDealer({
+          client_id: clientId,
+          name: newDealer.name,
+          cnic: newDealer.cnic,
+          phone: newDealer.contactNumber,
+          email: "", // Will be empty for now
+          address: "", // Will be empty for now
+          license_number: "", // Will be empty for now
+        })
+
+        setSuccess(`Dealer "${newDealer.name}" added successfully!`)
+        setNewDealer({ name: "", cnic: "", contactNumber: "" })
+        setIsAddDealerOpen(false)
+        await loadDealers(clientId)
+      } catch (error: any) {
+        console.error("Error adding dealer:", error)
+        setError(`Failed to add dealer: ${error.message}`)
       }
-      setDealers([...dealers, dealer])
-      setNewDealer({ name: "", cnic: "", contactNumber: "" })
-      setIsAddDealerOpen(false)
     }
   }
 
@@ -293,6 +294,90 @@ export default function DealersPage() {
     return carDeals.filter((deal) => deal.dealerId === dealerId)
   }
 
+  const downloadFile = async (url: string, filename: string) => {
+    try {
+      // Check if URL is valid
+      if (!url || url === "/placeholder.svg") {
+        alert("File not available for download.")
+        return
+      }
+
+      // Try direct download first (works for most cases)
+      try {
+        const response = await fetch(url)
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = downloadUrl
+        link.download = filename
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+      } catch (fetchError) {
+        console.warn("Fetch download failed, trying alternative method:", fetchError)
+
+        // Fallback: Direct link download (works for public URLs)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = filename
+        link.target = "_blank"
+        link.rel = "noopener noreferrer"
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+
+        console.log("Download initiated using fallback method")
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error)
+      alert("Error downloading file. The file may not exist or is not accessible.")
+    }
+  }
+
+  const viewFile = (url: string, filename?: string) => {
+    try {
+      // Check if URL is valid
+      if (!url || url === "/placeholder.svg") {
+        alert("File not available for viewing.")
+        return
+      }
+
+      // Get file extension to determine how to handle the file
+      const fileExtension = filename ? filename.split('.').pop()?.toLowerCase() : ''
+
+      // Handle different file types
+      if (fileExtension && ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension)) {
+        // These files can be viewed directly in browser
+        const newWindow = window.open(url, "_blank")
+        if (!newWindow) {
+          // Popup blocked, try alternative method
+          const link = document.createElement("a")
+          link.href = url
+          link.target = "_blank"
+          link.rel = "noopener noreferrer"
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+        }
+      } else {
+        // For other file types, offer to download instead
+        if (confirm(`This file type (${fileExtension || 'unknown'}) cannot be previewed in browser. Would you like to download it instead?`)) {
+          downloadFile(url, filename || 'document')
+        }
+      }
+    } catch (error) {
+      console.error("Error viewing file:", error)
+      alert("Error opening file. The file may not exist or is not accessible.")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -309,6 +394,18 @@ export default function DealersPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Success/Error Messages */}
+        {success && (
+          <div className="mb-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+            {success}
+          </div>
+        )}
+        {error && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            {error}
+          </div>
+        )}
+
         <Tabs defaultValue="dealers" className="space-y-6">
           <TabsList>
             <TabsTrigger value="dealers">Dealers</TabsTrigger>
@@ -478,6 +575,13 @@ export default function DealersPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => (window.location.href = `/dashboard/dealers/${dealer.id}`)}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -701,10 +805,39 @@ export default function DealersPage() {
                           <TableCell>
                             <div className="flex gap-2">
                               {debt.documents.length > 0 ? (
-                                <Button variant="outline" size="sm">
-                                  <FileText className="w-4 h-4 mr-1" />
-                                  {debt.documents.length} files
-                                </Button>
+                                <div className="flex gap-1">
+                                  {debt.documents.map((docPath, index) => {
+                                    const docUrl = getFileUrl("debt-documents", docPath)
+                                    const docName = docPath.split("/").pop() || `Document ${index + 1}`
+                                    return (
+                                      <div key={index} className="flex gap-1">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => viewFile(docUrl, docName)}
+                                          title="View File"
+                                        >
+                                          <Eye className="w-4 h-4 mr-1" />
+                                          View
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => downloadFile(docUrl, docName)}
+                                          title="Download File"
+                                        >
+                                          <Download className="w-4 h-4 mr-1" />
+                                          Download
+                                        </Button>
+                                      </div>
+                                    )
+                                  })}
+                                  {debt.documents.length > 1 && (
+                                    <span className="text-sm text-gray-500 self-center ml-2">
+                                      {debt.documents.length} files
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-gray-400">No documents</span>
                               )}

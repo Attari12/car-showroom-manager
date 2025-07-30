@@ -20,14 +20,10 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye } from "lucide-react"
+import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye, Download } from "lucide-react"
+import { getBuyers, createBuyer, getCars, type Buyer as SupaBuyer, getFileUrl } from "@/lib/supabase-client"
 
-interface Buyer {
-  id: string
-  name: string
-  cnic: string
-  contactNumber: string
-  createdAt: string
+interface Buyer extends SupaBuyer {
   totalPurchases: number
   totalSpent: number
 }
@@ -57,93 +53,83 @@ interface CarPurchase {
 }
 
 export default function BuyersPage() {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [clientId, setClientId] = useState<string>("")
+
   // Authentication check
   useEffect(() => {
     const userType = localStorage.getItem("userType")
-    if (userType !== "client") {
+    const storedClientId = localStorage.getItem("clientId")
+
+    if (userType !== "client" || !storedClientId) {
       window.location.href = "/"
       return
     }
+
+    setClientId(storedClientId)
+    loadBuyers(storedClientId)
   }, [])
 
-  const [buyers, setBuyers] = useState<Buyer[]>([
-    {
-      id: "1",
-      name: "Ahmed Ali Khan",
-      cnic: "42101-1234567-1",
-      contactNumber: "+92-300-1234567",
-      createdAt: "2024-01-15",
-      totalPurchases: 2,
-      totalSpent: 5150000,
-    },
-    {
-      id: "2",
-      name: "Sara Malik",
-      cnic: "42101-9876543-2",
-      contactNumber: "+92-321-9876543",
-      createdAt: "2024-01-18",
-      totalPurchases: 1,
-      totalSpent: 2050000,
-    },
-  ])
+  const [buyers, setBuyers] = useState<Buyer[]>([])
 
-  const [buyerDebts, setBuyerDebts] = useState<BuyerDebt[]>([
-    {
-      id: "1",
-      buyerId: "1",
-      amount: 100000,
-      type: "owed_to_client",
-      description: "Remaining payment for Toyota Corolla",
-      createdAt: "2024-01-20",
-      documents: [],
-      isSettled: false,
-    },
-    {
-      id: "2",
-      buyerId: "2",
-      amount: 50000,
-      type: "owed_by_client",
-      description: "Advance payment received",
-      createdAt: "2024-01-22",
-      documents: [],
-      isSettled: true,
-      settledDate: "2024-01-24",
-      settledAmount: 50000,
-    },
-  ])
+  const loadBuyers = async (clientId: string) => {
+    try {
+      setLoading(true)
+      setError("")
 
-  const [carPurchases, setCarPurchases] = useState<CarPurchase[]>([
-    {
-      id: "1",
-      buyerId: "1",
-      carMake: "Toyota",
-      carModel: "Corolla",
-      carYear: 2020,
-      registrationNumber: "LZH-238",
-      purchasePrice: 2750000,
-      purchaseDate: "2024-01-18",
-    },
-    {
-      id: "2",
-      buyerId: "1",
-      carMake: "Honda",
-      carModel: "City",
-      carYear: 2019,
-      registrationNumber: "KHI-789",
-      purchasePrice: 2400000,
-      purchaseDate: "2024-01-10",
-    },
-    {
-      id: "3",
-      buyerId: "2",
-      carMake: "Suzuki",
-      carModel: "Alto",
-      carYear: 2021,
-      registrationNumber: "ISB-789",
-      purchasePrice: 2050000,
-      purchaseDate: "2024-01-20",
-    },
-  ])
+      // Load buyers and cars in parallel
+      const [buyersData, carsData] = await Promise.all([
+        getBuyers(clientId),
+        getCars(clientId)
+      ])
+
+      // Calculate purchase statistics for each buyer
+      const transformedBuyers: Buyer[] = buyersData.map(buyer => {
+        // Find cars purchased by this buyer (sold cars with matching buyer_id)
+        const buyerCars = carsData.filter(car =>
+          car.buyer_id === buyer.id && car.status === "sold"
+        )
+
+        // Calculate total purchases and total spent
+        const totalPurchases = buyerCars.length
+        const totalSpent = buyerCars.reduce((sum, car) => sum + car.asking_price, 0)
+
+        return {
+          ...buyer,
+          totalPurchases,
+          totalSpent,
+        }
+      })
+
+      // Also update car purchases data for the purchases tab
+      const allCarPurchases: CarPurchase[] = carsData
+        .filter(car => car.buyer_id && car.status === "sold")
+        .map(car => ({
+          id: car.id,
+          buyerId: car.buyer_id!,
+          carMake: car.make,
+          carModel: car.model,
+          carYear: car.year,
+          registrationNumber: car.registration_number,
+          purchasePrice: car.asking_price, // This is the sold price
+          purchaseDate: car.updated_at.split('T')[0], // Sale date
+        }))
+
+      setBuyers(transformedBuyers)
+      setCarPurchases(allCarPurchases)
+    } catch (error: any) {
+      console.error("Error loading buyers:", error)
+      setError(`Failed to load buyers: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const [buyerDebts, setBuyerDebts] = useState<BuyerDebt[]>([])
+
+  const [carPurchases, setCarPurchases] = useState<CarPurchase[]>([])
 
   const [newBuyer, setNewBuyer] = useState({
     name: "",
@@ -218,20 +204,29 @@ export default function BuyersPage() {
     )
   })
 
-  const handleAddBuyer = () => {
+  const handleAddBuyer = async () => {
     if (newBuyer.name && newBuyer.cnic && newBuyer.contactNumber) {
-      const buyer: Buyer = {
-        id: Date.now().toString(),
-        name: newBuyer.name,
-        cnic: newBuyer.cnic,
-        contactNumber: newBuyer.contactNumber,
-        createdAt: new Date().toISOString().split("T")[0],
-        totalPurchases: 0,
-        totalSpent: 0,
+      try {
+        setError("")
+        setSuccess("")
+
+        const buyer = await createBuyer({
+          client_id: clientId,
+          name: newBuyer.name,
+          cnic: newBuyer.cnic,
+          phone: newBuyer.contactNumber,
+          email: "", // Will be empty for now
+          address: "", // Will be empty for now
+        })
+
+        setSuccess(`Buyer "${newBuyer.name}" added successfully!`)
+        setNewBuyer({ name: "", cnic: "", contactNumber: "" })
+        setIsAddBuyerOpen(false)
+        await loadBuyers(clientId)
+      } catch (error: any) {
+        console.error("Error adding buyer:", error)
+        setError(`Failed to add buyer: ${error.message}`)
       }
-      setBuyers([...buyers, buyer])
-      setNewBuyer({ name: "", cnic: "", contactNumber: "" })
-      setIsAddBuyerOpen(false)
     }
   }
 
@@ -296,6 +291,90 @@ export default function BuyersPage() {
     return carPurchases.filter((purchase) => purchase.buyerId === buyerId)
   }
 
+  const downloadFile = async (url: string, filename: string) => {
+    try {
+      // Check if URL is valid
+      if (!url || url === "/placeholder.svg") {
+        alert("File not available for download.")
+        return
+      }
+
+      // Try direct download first (works for most cases)
+      try {
+        const response = await fetch(url)
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = downloadUrl
+        link.download = filename
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+      } catch (fetchError) {
+        console.warn("Fetch download failed, trying alternative method:", fetchError)
+
+        // Fallback: Direct link download (works for public URLs)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = filename
+        link.target = "_blank"
+        link.rel = "noopener noreferrer"
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+
+        console.log("Download initiated using fallback method")
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error)
+      alert("Error downloading file. The file may not exist or is not accessible.")
+    }
+  }
+
+  const viewFile = (url: string, filename?: string) => {
+    try {
+      // Check if URL is valid
+      if (!url || url === "/placeholder.svg") {
+        alert("File not available for viewing.")
+        return
+      }
+
+      // Get file extension to determine how to handle the file
+      const fileExtension = filename ? filename.split('.').pop()?.toLowerCase() : ''
+
+      // Handle different file types
+      if (fileExtension && ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension)) {
+        // These files can be viewed directly in browser
+        const newWindow = window.open(url, "_blank")
+        if (!newWindow) {
+          // Popup blocked, try alternative method
+          const link = document.createElement("a")
+          link.href = url
+          link.target = "_blank"
+          link.rel = "noopener noreferrer"
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+        }
+      } else {
+        // For other file types, offer to download instead
+        if (confirm(`This file type (${fileExtension || 'unknown'}) cannot be previewed in browser. Would you like to download it instead?`)) {
+          downloadFile(url, filename || 'document')
+        }
+      }
+    } catch (error) {
+      console.error("Error viewing file:", error)
+      alert("Error opening file. The file may not exist or is not accessible.")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -312,6 +391,18 @@ export default function BuyersPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Success/Error Messages */}
+        {success && (
+          <div className="mb-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+            {success}
+          </div>
+        )}
+        {error && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            {error}
+          </div>
+        )}
+
         <Tabs defaultValue="buyers" className="space-y-6">
           <TabsList>
             <TabsTrigger value="buyers">Buyers</TabsTrigger>
@@ -412,7 +503,7 @@ export default function BuyersPage() {
                         <TableRow key={buyer.id}>
                           <TableCell className="font-medium">{buyer.name}</TableCell>
                           <TableCell>{buyer.cnic}</TableCell>
-                          <TableCell>{buyer.contactNumber}</TableCell>
+                          <TableCell>{buyer.phone}</TableCell>
                           <TableCell>{buyer.totalPurchases}</TableCell>
                           <TableCell>{formatCurrency(buyer.totalSpent)}</TableCell>
                           <TableCell>
@@ -446,7 +537,7 @@ export default function BuyersPage() {
                                   setNewBuyer({
                                     name: buyer.name,
                                     cnic: buyer.cnic,
-                                    contactNumber: buyer.contactNumber,
+                                    contactNumber: buyer.phone,
                                   })
                                   setIsEditBuyerOpen(true)
                                 }}
@@ -660,10 +751,39 @@ export default function BuyersPage() {
                           <TableCell>
                             <div className="flex gap-2">
                               {debt.documents.length > 0 ? (
-                                <Button variant="outline" size="sm">
-                                  <FileText className="w-4 h-4 mr-1" />
-                                  {debt.documents.length} files
-                                </Button>
+                                <div className="flex gap-1">
+                                  {debt.documents.map((docPath, index) => {
+                                    const docUrl = getFileUrl("debt-documents", docPath)
+                                    const docName = docPath.split("/").pop() || `Document ${index + 1}`
+                                    return (
+                                      <div key={index} className="flex gap-1">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => viewFile(docUrl, docName)}
+                                          title="View File"
+                                        >
+                                          <Eye className="w-4 h-4 mr-1" />
+                                          View
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => downloadFile(docUrl, docName)}
+                                          title="Download File"
+                                        >
+                                          <Download className="w-4 h-4 mr-1" />
+                                          Download
+                                        </Button>
+                                      </div>
+                                    )
+                                  })}
+                                  {debt.documents.length > 1 && (
+                                    <span className="text-sm text-gray-500 self-center ml-2">
+                                      {debt.documents.length} files
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-gray-400">No documents</span>
                               )}
