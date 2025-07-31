@@ -55,12 +55,31 @@ export default function SoldCarsPage() {
   }
 
   const calculateProfit = (car: CarType) => {
-    return car.asking_price - car.purchase_price - (car.dealer_commission || 0)
+    // Extract money spent from description
+    let moneySpent = 0
+    if (car.description) {
+      const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+      if (moneySpentMatch) {
+        moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+      }
+    }
+
+    return car.asking_price - car.purchase_price - (car.dealer_commission || 0) - (car.repair_costs || 0) - (car.additional_expenses || 0) - moneySpent
   }
 
   const calculateProfitMargin = (car: CarType) => {
     const profit = calculateProfit(car)
     return ((profit / car.asking_price) * 100).toFixed(1)
+  }
+
+  const getMoneySpent = (car: CarType) => {
+    if (car.description) {
+      const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+      if (moneySpentMatch) {
+        return parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+      }
+    }
+    return 0
   }
 
   const filteredCars = cars.filter((car) => {
@@ -82,7 +101,7 @@ export default function SoldCarsPage() {
 
   const totalRevenue = filteredCars.reduce((sum, car) => sum + car.asking_price, 0)
   const totalProfit = filteredCars.reduce((sum, car) => sum + calculateProfit(car), 0)
-  const totalCommission = filteredCars.reduce((sum, car) => sum + (car.dealer_commission || 0), 0)
+  const totalExpenses = filteredCars.reduce((sum, car) => sum + (car.dealer_commission || 0) + (car.repair_costs || 0) + (car.additional_expenses || 0) + getMoneySpent(car), 0)
   const averageProfit = filteredCars.length > 0 ? totalProfit / filteredCars.length : 0
 
   const months = [
@@ -128,7 +147,7 @@ export default function SoldCarsPage() {
         )}
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Cars Sold</CardTitle>
@@ -170,6 +189,17 @@ export default function SoldCarsPage() {
             <CardContent>
               <div className="text-2xl font-bold text-blue-600">{formatCurrency(averageProfit)}</div>
               <p className="text-xs text-muted-foreground">Per car</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
+              <DollarSign className="h-4 w-4 text-red-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">{formatCurrency(totalExpenses)}</div>
+              <p className="text-xs text-muted-foreground">All costs</p>
             </CardContent>
           </Card>
         </div>
@@ -287,6 +317,24 @@ export default function SoldCarsPage() {
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-600">Commission:</span>
                           <span className="text-red-600">-{formatCurrency(car.dealer_commission)}</span>
+                        </div>
+                      )}
+                      {car.repair_costs && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Repairs:</span>
+                          <span className="text-red-600">-{formatCurrency(car.repair_costs)}</span>
+                        </div>
+                      )}
+                      {car.additional_expenses && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Other Expenses:</span>
+                          <span className="text-red-600">-{formatCurrency(car.additional_expenses)}</span>
+                        </div>
+                      )}
+                      {getMoneySpent(car) > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Money Spent:</span>
+                          <span className="text-red-600">-{formatCurrency(getMoneySpent(car))}</span>
                         </div>
                       )}
                       <div className="flex justify-between text-sm">

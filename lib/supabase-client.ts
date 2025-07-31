@@ -26,18 +26,35 @@ export interface Car {
   model: string
   year: number
   registration_number: string
+  color: string
+  condition: string
   mileage: number
   purchase_price: number
   asking_price: number
   purchase_date: string
   owner_name: string
   dealer_commission?: number
+  repair_costs?: number
+  additional_expenses?: number
   status: "available" | "sold" | "reserved" | "pending"
   description?: string
   images?: string[]
   documents?: string[]
   dealer_id?: string
   buyer_id?: string
+  seller_id?: string
+  // Investment tracking fields
+  showroom_investment: number
+  ownership_type: "partially_owned" | "fully_investor_owned"
+  commission_type: "flat" | "percentage"
+  commission_amount: number
+  commission_percentage: number
+  investors?: Array<{
+    id?: string
+    name: string
+    cnic: string
+    investment_amount: number
+  }>
   auction_sheet?: {
     trunk: boolean
     pillars: boolean
@@ -77,6 +94,48 @@ export interface Buyer {
   phone: string
   address: string
   cnic: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Investor {
+  id: string
+  client_id: string
+  name: string
+  email?: string
+  phone: string
+  address?: string
+  cnic: string
+  total_investment: number
+  total_profit: number
+  active_investments: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Seller {
+  id: string
+  client_id: string
+  name: string
+  email?: string
+  phone: string
+  address?: string
+  cnic: string
+  total_cars_sold: number
+  total_amount_paid: number
+  last_sale_date?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CarInvestment {
+  id: string
+  car_id: string
+  investor_id: string
+  investment_amount: number
+  ownership_percentage: number
+  profit_earned: number
+  is_active: boolean
   created_at: string
   updated_at: string
 }
@@ -395,8 +454,14 @@ export async function updateCar(id: string, updates: Partial<Car>) {
       .single()
 
     if (error) {
-      console.error("Supabase error:", error)
-      throw error
+      console.error("Supabase error details:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        finalUpdates
+      })
+      throw new Error(`Database error: ${error.message}`)
     }
 
     // Extract auction_sheet data from description field before returning
@@ -535,6 +600,264 @@ export async function createBuyer(buyer: Omit<Buyer, "id" | "created_at" | "upda
   }
 }
 
+// Investor operations
+export async function getInvestors(clientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("investors")
+      .select("*")
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data || []
+  } catch (error) {
+    console.error("Error in getInvestors:", error)
+    throw error
+  }
+}
+
+export async function getInvestorById(id: string) {
+  try {
+    const { data, error } = await supabase
+      .from("investors")
+      .select("*")
+      .eq("id", id)
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in getInvestorById:", error)
+    throw error
+  }
+}
+
+export async function createInvestor(investor: Omit<Investor, "id" | "created_at" | "updated_at">) {
+  try {
+    const { data, error } = await supabase
+      .from("investors")
+      .insert([
+        {
+          ...investor,
+          email: investor.email || "",
+          address: investor.address || "",
+          total_investment: 0,
+          total_profit: 0,
+          active_investments: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in createInvestor:", error)
+    throw error
+  }
+}
+
+export async function updateInvestor(id: string, updates: Partial<Investor>) {
+  try {
+    const { data, error } = await supabase
+      .from("investors")
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in updateInvestor:", error)
+    throw error
+  }
+}
+
+export async function deleteInvestor(id: string) {
+  try {
+    const { error } = await supabase.from("investors").delete().eq("id", id)
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+  } catch (error) {
+    console.error("Error in deleteInvestor:", error)
+    throw error
+  }
+}
+
+// Seller operations
+export async function getSellers(clientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("sellers")
+      .select("*")
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data || []
+  } catch (error) {
+    console.error("Error in getSellers:", error)
+    throw error
+  }
+}
+
+export async function getSellerById(id: string) {
+  try {
+    const { data, error } = await supabase
+      .from("sellers")
+      .select("*")
+      .eq("id", id)
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in getSellerById:", error)
+    throw error
+  }
+}
+
+export async function createSeller(seller: Omit<Seller, "id" | "created_at" | "updated_at">) {
+  try {
+    const { data, error } = await supabase
+      .from("sellers")
+      .insert([
+        {
+          ...seller,
+          email: seller.email || "",
+          address: seller.address || "",
+          total_cars_sold: 0,
+          total_amount_paid: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in createSeller:", error)
+    throw error
+  }
+}
+
+export async function updateSeller(id: string, updates: Partial<Seller>) {
+  try {
+    const { data, error } = await supabase
+      .from("sellers")
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in updateSeller:", error)
+    throw error
+  }
+}
+
+export async function deleteSeller(id: string) {
+  try {
+    const { error } = await supabase.from("sellers").delete().eq("id", id)
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+  } catch (error) {
+    console.error("Error in deleteSeller:", error)
+    throw error
+  }
+}
+
+// Car Investment operations
+export async function getCarInvestments(carId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("car_investments")
+      .select(`
+        *,
+        investor:investors(*)
+      `)
+      .eq("car_id", carId)
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data || []
+  } catch (error) {
+    console.error("Error in getCarInvestments:", error)
+    throw error
+  }
+}
+
+export async function createCarInvestment(investment: Omit<CarInvestment, "id" | "created_at" | "updated_at">) {
+  try {
+    const { data, error } = await supabase
+      .from("car_investments")
+      .insert([
+        {
+          ...investment,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data
+  } catch (error) {
+    console.error("Error in createCarInvestment:", error)
+    throw error
+  }
+}
+
 // File upload operations
 export async function uploadFile(file: File, bucket: string, path: string) {
   try {
@@ -599,6 +922,18 @@ export const dbOperations = {
   createDealer,
   getBuyers,
   createBuyer,
+  getInvestors,
+  getInvestorById,
+  createInvestor,
+  updateInvestor,
+  deleteInvestor,
+  getSellers,
+  getSellerById,
+  createSeller,
+  updateSeller,
+  deleteSeller,
+  getCarInvestments,
+  createCarInvestment,
   uploadFile,
   deleteFile,
   getFileUrl,

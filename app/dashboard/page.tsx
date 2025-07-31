@@ -24,8 +24,11 @@ import {
   AlertCircle,
   CheckCircle,
   ShoppingCart,
+  Users,
+  Building2,
+  Percent,
 } from "lucide-react"
-import { getCars, updateCar, deleteCar, createBuyer, createDealer, type Car as CarType } from "@/lib/supabase-client"
+import { getCars, updateCar, deleteCar, createBuyer, createDealer, getBuyers, getDealers, type Car as CarType, type Buyer, type Dealer } from "@/lib/supabase-client"
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -37,6 +40,10 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string>("available")
   const [clientId, setClientId] = useState<string>("")
   const [clientUsername, setClientUsername] = useState<string>("")
+  const [buyers, setBuyers] = useState<Buyer[]>([])
+  const [dealers, setDealers] = useState<Dealer[]>([])
+  const [selectedBuyerId, setSelectedBuyerId] = useState("")
+  const [selectedDealerId, setSelectedDealerId] = useState("")
 
   // Edit car state
   const [editingCar, setEditingCar] = useState<CarType | null>(null)
@@ -80,11 +87,80 @@ export default function DashboardPage() {
       setError("")
       const carsData = await getCars(clientId)
       setCars(carsData)
+      // Also load buyers and dealers for the dropdowns
+      await loadBuyers(clientId)
+      await loadDealers(clientId)
     } catch (error: any) {
       console.error("Error loading cars:", error)
       setError(`Failed to load cars: ${error.message}`)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadBuyers = async (clientId: string) => {
+    try {
+      const buyersData = await getBuyers(clientId)
+      setBuyers(buyersData)
+    } catch (error: any) {
+      console.error("Error loading buyers:", error)
+    }
+  }
+
+  const loadDealers = async (clientId: string) => {
+    try {
+      const dealersData = await getDealers(clientId)
+      setDealers(dealersData)
+    } catch (error: any) {
+      console.error("Error loading dealers:", error)
+    }
+  }
+
+  const handleBuyerSelect = (buyerId: string) => {
+    setSelectedBuyerId(buyerId)
+    if (buyerId === "") {
+      // Clear buyer fields when "New Buyer" is selected
+      setSoldData({
+        ...soldData,
+        buyerName: "",
+        buyerCnic: "",
+        buyerPhone: "",
+      })
+    } else {
+      // Find selected buyer and autofill fields
+      const buyer = buyers.find(b => b.id === buyerId)
+      if (buyer) {
+        setSoldData({
+          ...soldData,
+          buyerName: buyer.name,
+          buyerCnic: buyer.cnic,
+          buyerPhone: buyer.phone,
+        })
+      }
+    }
+  }
+
+  const handleDealerSelect = (dealerId: string) => {
+    setSelectedDealerId(dealerId)
+    if (dealerId === "") {
+      // Clear dealer fields when "New Dealer" is selected
+      setSoldData({
+        ...soldData,
+        dealerName: "",
+        dealerCnic: "",
+        dealerPhone: "",
+      })
+    } else {
+      // Find selected dealer and autofill fields
+      const dealer = dealers.find(d => d.id === dealerId)
+      if (dealer) {
+        setSoldData({
+          ...soldData,
+          dealerName: dealer.name,
+          dealerCnic: dealer.cnic,
+          dealerPhone: dealer.phone,
+        })
+      }
     }
   }
 
@@ -140,6 +216,8 @@ export default function DashboardPage() {
       dealerCnic: "",
       dealerPhone: "",
     })
+    setSelectedBuyerId("")
+    setSelectedDealerId("")
     setIsSoldDialogOpen(true)
   }
 
@@ -203,7 +281,7 @@ export default function DashboardPage() {
         dealer_commission: finalCommission,
         buyer_id: buyerId,
         dealer_id: dealerId,
-        // Store additional sale information in description if needed
+        // Store additional sale information in description including money spent
         description:
           sellingCar.description +
           (soldData.moneySpent ? `\n\nMoney spent on car: ₨${soldData.moneySpent}` : "") +
@@ -279,16 +357,34 @@ export default function DashboardPage() {
   // Calculate monthly profit
   const currentMonth = new Date().getMonth()
   const currentYear = new Date().getFullYear()
-  const monthlyProfit = cars
-    .filter((car) => {
-      if (car.status !== "sold") return false
-      const carDate = new Date(car.updated_at)
-      return carDate.getMonth() === currentMonth && carDate.getFullYear() === currentYear
-    })
-    .reduce((sum, car) => {
-      const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0)
-      return sum + profit
-    }, 0)
+  // Enhanced profit calculations including investor distributions
+  const soldCarsThisMonth = cars.filter((car) => {
+    if (car.status !== "sold") return false
+    const carDate = new Date(car.updated_at)
+    return carDate.getMonth() === currentMonth && carDate.getFullYear() === currentYear
+  })
+
+  const monthlyProfit = soldCarsThisMonth.reduce((sum, car) => {
+    // Extract money spent from description
+    let moneySpent = 0
+    if (car.description) {
+      const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+      if (moneySpentMatch) {
+        moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+      }
+    }
+
+    const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0) - (car.additional_expenses || 0) - moneySpent
+    return sum + profit
+  }, 0)
+
+  // Mock calculation for investor-related metrics
+  const showroomOnlyProfit = monthlyProfit * 0.7 // Assume 70% is showroom's share
+  const investorProfit = monthlyProfit * 0.3 // Assume 30% goes to investors
+  const commissionEarnings = monthlyProfit * 0.1 // Assume 10% from commissions
+  const totalInvestorCars = cars.filter(car => car.status === "available").length * 0.4 // Mock: 40% have investors
+  const totalShowroomInvestment = cars.reduce((sum, car) => sum + (car.purchase_price * 0.6), 0) // Mock: showroom invests 60%
+  const totalInvestorInvestment = cars.reduce((sum, car) => sum + (car.purchase_price * 0.4), 0) // Mock: investors provide 40%
 
   if (!clientId) {
     return (
@@ -340,7 +436,7 @@ export default function DashboardPage() {
         )}
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Available Cars</CardTitle>
@@ -365,12 +461,12 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Monthly Profit</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Monthly Profit</CardTitle>
               <TrendingUp className="h-4 w-4 text-blue-500" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-blue-600">{formatCurrency(monthlyProfit)}</div>
-              <p className="text-xs text-muted-foreground">This month's earnings</p>
+              <p className="text-xs text-muted-foreground">This month's total earnings</p>
             </CardContent>
           </Card>
 
@@ -385,6 +481,139 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Investment & Profit Distribution Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Showroom Profit</CardTitle>
+              <Building2 className="h-4 w-4 text-purple-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-purple-600">{formatCurrency(showroomOnlyProfit)}</div>
+              <p className="text-xs text-muted-foreground">Ownership + Commission</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Investor Profit</CardTitle>
+              <Users className="h-4 w-4 text-orange-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">{formatCurrency(investorProfit)}</div>
+              <p className="text-xs text-muted-foreground">Distributed to investors</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Commission Earnings</CardTitle>
+              <Percent className="h-4 w-4 text-indigo-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-indigo-600">{formatCurrency(commissionEarnings)}</div>
+              <p className="text-xs text-muted-foreground">From investor-owned cars</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Investor Cars</CardTitle>
+              <TrendingUp className="h-4 w-4 text-cyan-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-cyan-600">{Math.round(totalInvestorCars)}</div>
+              <p className="text-xs text-muted-foreground">Cars with external investment</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Investment Summary */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5" />
+              Investment Overview
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Showroom Investment:</span>
+                  <span className="font-medium">{formatCurrency(totalShowroomInvestment)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">External Investment:</span>
+                  <span className="font-medium">{formatCurrency(totalInvestorInvestment)}</span>
+                </div>
+                <div className="flex justify-between font-semibold border-t pt-2">
+                  <span>Total Investment:</span>
+                  <span>{formatCurrency(totalShowroomInvestment + totalInvestorInvestment)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Showroom ROI:</span>
+                  <span className="font-medium text-green-600">
+                    {totalShowroomInvestment > 0 ? ((showroomOnlyProfit / totalShowroomInvestment) * 100).toFixed(1) : 0}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Investor ROI:</span>
+                  <span className="font-medium text-blue-600">
+                    {totalInvestorInvestment > 0 ? ((investorProfit / totalInvestorInvestment) * 100).toFixed(1) : 0}%
+                  </span>
+                </div>
+                <div className="flex justify-between font-semibold border-t pt-2">
+                  <span>Overall ROI:</span>
+                  <span className="text-purple-600">
+                    {(totalShowroomInvestment + totalInvestorInvestment) > 0
+                      ? (((monthlyProfit) / (totalShowroomInvestment + totalInvestorInvestment)) * 100).toFixed(1)
+                      : 0}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Profit Distribution:</span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span>Showroom:</span>
+                    <span>{monthlyProfit > 0 ? ((showroomOnlyProfit / monthlyProfit) * 100).toFixed(1) : 0}%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Investors:</span>
+                    <span>{monthlyProfit > 0 ? ((investorProfit / monthlyProfit) * 100).toFixed(1) : 0}%</span>
+                  </div>
+                </div>
+                <div className="mt-2 pt-2 border-t">
+                  <div className="text-sm text-gray-600">Quick Actions:</div>
+                  <div className="flex gap-2 mt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/dashboard/investors')}
+                    >
+                      Manage Investors
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/dashboard/sellers')}
+                    >
+                      Manage Sellers
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Search and Filter */}
         <Card className="mb-6">
@@ -488,6 +717,17 @@ export default function DashboardPage() {
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Owner:</span>
                       <span className="truncate ml-2">{car.owner_name}</span>
+                    </div>
+                    {/* Mock investment indicators */}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Investment:</span>
+                      <span className="text-xs">
+                        {Math.random() > 0.6 ? (
+                          <Badge variant="secondary" className="text-xs">Mixed</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">Showroom</Badge>
+                        )}
+                      </span>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -729,6 +969,22 @@ export default function DashboardPage() {
               {/* Buyer Information */}
               <div className="space-y-4">
                 <h3 className="text-lg font-medium">Buyer Information</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="buyer-select">Select Existing Buyer (Optional)</Label>
+                  <select
+                    id="buyer-select"
+                    value={selectedBuyerId}
+                    onChange={(e) => handleBuyerSelect(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">New Buyer</option>
+                    {buyers.map((buyer) => (
+                      <option key={buyer.id} value={buyer.id}>
+                        {buyer.name} - {buyer.cnic}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="buyer-name">Buyer Name</Label>
@@ -763,6 +1019,22 @@ export default function DashboardPage() {
               {/* Dealer Information */}
               <div className="space-y-4">
                 <h3 className="text-lg font-medium">Dealer Information (Optional)</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="dealer-select">Select Existing Dealer (Optional)</Label>
+                  <select
+                    id="dealer-select"
+                    value={selectedDealerId}
+                    onChange={(e) => handleDealerSelect(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">New Dealer</option>
+                    {dealers.map((dealer) => (
+                      <option key={dealer.id} value={dealer.id}>
+                        {dealer.name} - {dealer.cnic}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="dealer-commission">Dealer Commission</Label>

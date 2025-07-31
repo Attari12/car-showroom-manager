@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { Car, ShoppingCart, Users, UserCheck, BarChart3, Plus, LogOut, Menu, X } from "lucide-react"
+import { Car, ShoppingCart, Users, UserCheck, BarChart3, Plus, LogOut, Menu, X, TrendingUp, Building2 } from "lucide-react"
 
 const navigation = [
   { name: "Car Inventory", href: "/dashboard", icon: Car },
@@ -12,6 +12,8 @@ const navigation = [
   { name: "Sold Cars", href: "/dashboard/sold-cars", icon: ShoppingCart },
   { name: "Buyers", href: "/dashboard/buyers", icon: Users },
   { name: "Dealers", href: "/dashboard/dealers", icon: UserCheck },
+  { name: "Investors", href: "/dashboard/investors", icon: TrendingUp },
+  { name: "Sellers", href: "/dashboard/sellers", icon: Building2 },
   { name: "Reports", href: "/dashboard/reports", icon: BarChart3 },
 ]
 

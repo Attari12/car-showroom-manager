@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   ArrowLeft,
   Download,
@@ -23,9 +24,13 @@ import {
   AlertCircle,
   CheckCircle,
   ImageIcon,
+  TrendingUp,
+  Building2,
+  Percent,
+  Plus,
 } from "lucide-react"
 import { useFileUpload } from "@/hooks/use-file-upload"
-import { createCar, type Car as CarType } from "@/lib/supabase-client"
+import { createCar, getSellers, getInvestors, getDealers, createSeller, createDealer, createInvestor, createCarInvestment, type Car as CarType, type Seller, type Investor } from "@/lib/supabase-client"
 
 interface CarCondition {
   trunk: boolean
@@ -41,6 +46,17 @@ interface CarCondition {
   backRightFender: boolean
   backLeftFender: boolean
 }
+
+interface InvestorData {
+  id?: string
+  name: string
+  cnic: string
+  phone?: string
+  investment_amount: number
+}
+
+type OwnershipType = 'fully_showroom_owned' | 'partially_owned' | 'fully_investor_owned'
+type CommissionType = 'flat' | 'percentage'
 
 export default function AddCarPage() {
   const router = useRouter()
@@ -69,6 +85,8 @@ export default function AddCarPage() {
     model: "",
     year: new Date().getFullYear(),
     registration_number: "",
+    color: "",
+    condition: "Excellent",
     mileage: 0,
     purchase_price: 0,
     asking_price: 0,
@@ -77,6 +95,13 @@ export default function AddCarPage() {
     dealer_commission: 0,
     status: "available" as "available" | "sold" | "reserved" | "pending",
     description: "",
+    seller_id: "",
+    showroom_investment: 0,
+    ownership_type: "fully_showroom_owned" as OwnershipType,
+    dealer_id: "",
+    commission_type: "flat" as CommissionType,
+    commission_amount: 0,
+    commission_percentage: 0,
   })
 
   const [selectedImages, setSelectedImages] = useState<File[]>([])
@@ -97,6 +122,21 @@ export default function AddCarPage() {
   })
 
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [investors, setInvestors] = useState<InvestorData[]>([])
+  const [selectedSeller, setSelectedSeller] = useState<string>("")
+  const [availableSellers, setAvailableSellers] = useState<Seller[]>([])
+  const [availableInvestors, setAvailableInvestors] = useState<Investor[]>([])
+  const [availableDealers, setAvailableDealers] = useState<any[]>([])
+
+  // Modal states
+  const [isSellerModalOpen, setIsSellerModalOpen] = useState(false)
+  const [isDealerModalOpen, setIsDealerModalOpen] = useState(false)
+  const [isInvestorModalOpen, setIsInvestorModalOpen] = useState(false)
+
+  // Form states for modals
+  const [sellerForm, setSellerForm] = useState({ name: "", cnic: "", phone: "", email: "", address: "" })
+  const [dealerForm, setDealerForm] = useState({ name: "", cnic: "", phone: "", email: "", address: "", license_number: "" })
+  const [investorForm, setInvestorForm] = useState({ name: "", cnic: "", phone: "", email: "", address: "" })
 
   useEffect(() => {
     // Check authentication
@@ -109,7 +149,96 @@ export default function AddCarPage() {
     }
 
     setClientId(storedClientId)
+    loadSellersAndInvestors(storedClientId)
   }, [router])
+
+  const loadSellersAndInvestors = async (clientId: string) => {
+    try {
+      const [sellersData, investorsData, dealersData] = await Promise.all([
+        getSellers(clientId),
+        getInvestors(clientId),
+        getDealers(clientId)
+      ])
+      setAvailableSellers(sellersData)
+      setAvailableInvestors(investorsData)
+      setAvailableDealers(dealersData)
+    } catch (error) {
+      console.error("Error loading sellers, investors, and dealers:", error)
+    }
+  }
+
+  // Modal handlers
+  const handleCreateSeller = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      setError("")
+      const newSeller = await createSeller({
+        client_id: clientId,
+        name: sellerForm.name,
+        cnic: sellerForm.cnic,
+        phone: sellerForm.phone,
+        email: sellerForm.email,
+        address: sellerForm.address,
+      })
+
+      setAvailableSellers(prev => [...prev, newSeller])
+      setFormData(prev => ({ ...prev, seller_id: newSeller.id }))
+      setSellerForm({ name: "", cnic: "", phone: "", email: "", address: "" })
+      setIsSellerModalOpen(false)
+      setSuccess("Seller added successfully!")
+      setTimeout(() => setSuccess(""), 3000)
+    } catch (error: any) {
+      setError(`Failed to create seller: ${error.message}`)
+    }
+  }
+
+  const handleCreateDealer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      setError("")
+      const newDealer = await createDealer({
+        client_id: clientId,
+        name: dealerForm.name,
+        cnic: dealerForm.cnic,
+        phone: dealerForm.phone,
+        email: dealerForm.email,
+        address: dealerForm.address,
+        license_number: dealerForm.license_number,
+      })
+
+      setAvailableDealers(prev => [...prev, newDealer])
+      setFormData(prev => ({ ...prev, dealer_id: newDealer.id }))
+      setDealerForm({ name: "", cnic: "", phone: "", email: "", address: "", license_number: "" })
+      setIsDealerModalOpen(false)
+      setSuccess("Dealer added successfully!")
+      setTimeout(() => setSuccess(""), 3000)
+    } catch (error: any) {
+      setError(`Failed to create dealer: ${error.message}`)
+    }
+  }
+
+  const handleCreateInvestor = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      setError("")
+      const newInvestor = await createInvestor({
+        client_id: clientId,
+        name: investorForm.name,
+        cnic: investorForm.cnic,
+        phone: investorForm.phone,
+        email: investorForm.email,
+        address: investorForm.address,
+      })
+
+      setAvailableInvestors(prev => [...prev, newInvestor])
+      setInvestorForm({ name: "", cnic: "", phone: "", email: "", address: "" })
+      setIsInvestorModalOpen(false)
+      setSuccess("Investor added successfully!")
+      setTimeout(() => setSuccess(""), 3000)
+    } catch (error: any) {
+      setError(`Failed to create investor: ${error.message}`)
+    }
+  }
 
   const handleInputChange = (field: string, value: string | number) => {
     setFormData((prev) => ({
@@ -161,6 +290,46 @@ export default function AddCarPage() {
     return 1
   }
 
+  const handleAddInvestor = () => {
+    setInvestors([...investors, { name: "", cnic: "", investment_amount: 0 }])
+  }
+
+  const handleRemoveInvestor = (index: number) => {
+    setInvestors(investors.filter((_, i) => i !== index))
+  }
+
+  const handleInvestorChange = (index: number, field: keyof InvestorData, value: string | number) => {
+    const updatedInvestors = investors.map((inv, i) =>
+      i === index ? { ...inv, [field]: value } : inv
+    )
+    setInvestors(updatedInvestors)
+  }
+
+  const selectExistingInvestor = (index: number, investorId: string) => {
+    const existingInvestor = availableInvestors.find(inv => inv.id === investorId)
+    if (existingInvestor) {
+      handleInvestorChange(index, 'id', investorId)
+      handleInvestorChange(index, 'name', existingInvestor.name)
+      handleInvestorChange(index, 'cnic', existingInvestor.cnic)
+    }
+  }
+
+  const getTotalInvestment = () => {
+    if (formData.ownership_type === 'fully_showroom_owned') {
+      return formData.purchase_price || formData.asking_price || 0
+    }
+    const investorTotal = investors.reduce((sum, inv) => sum + (inv.investment_amount || 0), 0)
+    return formData.showroom_investment + investorTotal
+  }
+
+  const getShowroomOwnershipPercentage = () => {
+    if (formData.ownership_type === 'fully_showroom_owned') {
+      return 100
+    }
+    const total = getTotalInvestment()
+    return total > 0 ? (formData.showroom_investment / total) * 100 : 0
+  }
+
   const generateAuctionSheet = () => {
     const paintedParts = Object.values(carCondition).filter(Boolean).length
     const genuineParts = Object.keys(carCondition).length - paintedParts
@@ -186,7 +355,7 @@ Parts Condition (✓ = Painted, ✗ = Genuine):
 • Trunk: ${carCondition.trunk ? "✓ Painted" : "✗ Genuine"}
 • Pillars: ${carCondition.pillars ? "✓ Painted" : "✗ Genuine"}
 • Hood: ${carCondition.hood ? "✓ Painted" : "✗ Genuine"}
-• Roof: ${carCondition.roof ? "✓ Painted" : "✗ Genuine"}
+• Roof: ${carCondition.roof ? "✓ Painted" : "��� Genuine"}
 • Front Left Door: ${carCondition.frontLeftDoor ? "✓ Painted" : "✗ Genuine"}
 • Front Right Door: ${carCondition.frontRightDoor ? "✓ Painted" : "✗ Genuine"}
 • Back Left Door: ${carCondition.backLeftDoor ? "✓ Painted" : "✗ Genuine"}
@@ -220,8 +389,31 @@ Grade Scale:
     }
 
     // Validate required fields
-    if (!formData.make || !formData.model || !formData.registration_number || !formData.owner_name) {
+    if (!formData.make || !formData.model || !formData.registration_number || !formData.owner_name || !formData.color || !formData.condition) {
       setError("Please fill in all required fields")
+      setLoading(false)
+      return
+    }
+
+    // Validate investment fields if investors are added
+    if (investors.length > 0) {
+      const invalidInvestor = investors.find(inv => !inv.name || !inv.cnic || inv.investment_amount <= 0)
+      if (invalidInvestor) {
+        setError("Please fill in all investor details properly")
+        setLoading(false)
+        return
+      }
+    }
+
+    // Validate ownership and commission logic
+    if (formData.ownership_type === 'fully_investor_owned' && investors.length === 0) {
+      setError("Please add at least one investor for fully investor-owned cars")
+      setLoading(false)
+      return
+    }
+
+    if (formData.ownership_type === 'partially_owned' && formData.showroom_investment === 0 && investors.length === 0) {
+      setError("For partially owned cars, please specify either showroom investment or add investors")
       setLoading(false)
       return
     }
@@ -267,6 +459,8 @@ Grade Scale:
         model: formData.model,
         year: formData.year,
         registration_number: formData.registration_number,
+        color: formData.color,
+        condition: formData.condition,
         mileage: formData.mileage,
         purchase_price: formData.purchase_price,
         asking_price: formData.asking_price,
@@ -278,6 +472,15 @@ Grade Scale:
         images: imageUrls,
         documents: documentUrls,
         auction_sheet: carCondition,
+        seller_id: formData.seller_id || undefined,
+        dealer_id: formData.dealer_id || undefined,
+        showroom_investment: formData.showroom_investment,
+        ownership_type: formData.ownership_type,
+        commission_type: formData.commission_type,
+        commission_amount: formData.commission_amount,
+        commission_percentage: formData.commission_percentage,
+        color: formData.color,
+        condition: formData.condition,
       }
 
       console.log("Submitting car data:", carData)
@@ -293,6 +496,51 @@ Grade Scale:
         throw new Error("No data returned from car creation")
       }
 
+      const createdCar = Array.isArray(result.data) ? result.data[0] : result.data
+
+      // Create car investments if there are any investors
+      if (investors.length > 0 && createdCar.id) {
+        try {
+          const totalInvestment = getTotalInvestment()
+          for (const investor of investors) {
+            if (investor.investment_amount > 0) {
+              // If investor doesn't have an ID, create the investor first
+              let investorId = investor.id
+              if (!investorId && investor.name && investor.cnic) {
+                try {
+                  const newInvestor = await createInvestor({
+                    client_id: clientId,
+                    name: investor.name,
+                    cnic: investor.cnic,
+                    phone: investor.phone || "N/A",
+                  })
+                  investorId = newInvestor.id
+                } catch (error) {
+                  console.error("Error creating investor:", error)
+                  continue // Skip this investor if creation fails
+                }
+              }
+
+              if (investorId) {
+                const ownershipPercentage = totalInvestment > 0 ? (investor.investment_amount / totalInvestment) * 100 : 0
+                await createCarInvestment({
+                  car_id: createdCar.id,
+                  investor_id: investorId,
+                  investment_amount: investor.investment_amount,
+                  ownership_percentage: ownershipPercentage,
+                  profit_earned: 0,
+                  is_active: true,
+                })
+              }
+            }
+          }
+          console.log("Car investments created successfully")
+        } catch (investmentError) {
+          console.error("Error creating car investments:", investmentError)
+          // Don't throw here - car was created successfully, just log the investment error
+        }
+      }
+
       setSuccess("Car added successfully!")
 
       // Clear form
@@ -301,6 +549,8 @@ Grade Scale:
         model: "",
         year: new Date().getFullYear(),
         registration_number: "",
+        color: "",
+        condition: "Excellent",
         mileage: 0,
         purchase_price: 0,
         asking_price: 0,
@@ -309,7 +559,16 @@ Grade Scale:
         dealer_commission: 0,
         status: "available",
         description: "",
+        seller_id: "",
+        showroom_investment: 0,
+        ownership_type: "fully_showroom_owned",
+        dealer_id: "",
+        commission_type: "flat",
+        commission_amount: 0,
+        commission_percentage: 0,
       })
+      setInvestors([])
+      setSelectedSeller("")
       setSelectedImages([])
       setSelectedDocuments([])
       setImagePreviews([])
@@ -457,6 +716,72 @@ Grade Scale:
                     required
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="color">Color *</Label>
+                  <Input
+                    id="color"
+                    value={formData.color}
+                    onChange={(e) => handleInputChange("color", e.target.value)}
+                    placeholder="e.g., Pearl White, Silver Metallic"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="condition">Condition *</Label>
+                  <select
+                    id="condition"
+                    value={formData.condition}
+                    onChange={(e) => handleInputChange("condition", e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="Excellent">Excellent</option>
+                    <option value="Very Good">Very Good</option>
+                    <option value="Good">Good</option>
+                    <option value="Fair">Fair</option>
+                    <option value="Poor">Poor</option>
+                  </select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Seller Information */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="w-5 h-5" />
+                Seller Information
+              </CardTitle>
+              <CardDescription>Select who sold this car to the showroom</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="seller_id">Seller</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsSellerModalOpen(true)}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New Seller
+                  </Button>
+                </div>
+                <select
+                  id="seller_id"
+                  value={formData.seller_id}
+                  onChange={(e) => handleInputChange("seller_id", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select a seller (optional)</option>
+                  {availableSellers.map((seller) => (
+                    <option key={seller.id} value={seller.id}>
+                      {seller.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </CardContent>
           </Card>
@@ -507,6 +832,33 @@ Grade Scale:
                   />
                 </div>
                 <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="dealer_id">Dealer (Optional)</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsDealerModalOpen(true)}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Dealer
+                    </Button>
+                  </div>
+                  <select
+                    id="dealer_id"
+                    value={formData.dealer_id || ""}
+                    onChange={(e) => handleInputChange("dealer_id", e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select a dealer (optional)</option>
+                    {availableDealers.map((dealer) => (
+                      <option key={dealer.id} value={dealer.id}>
+                        {dealer.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="dealer_commission">Dealer Commission </Label>
                   <Input
                     id="dealer_commission"
@@ -519,6 +871,216 @@ Grade Scale:
                   />
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Investment & Ownership */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5" />
+                Investment & Ownership Structure
+              </CardTitle>
+              <CardDescription>Configure investment details and ownership distribution</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Showroom Investment */}
+              <div className="space-y-2">
+                <Label htmlFor="showroom_investment">Showroom Investment Amount</Label>
+                <Input
+                  id="showroom_investment"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.showroom_investment}
+                  onChange={(e) => handleInputChange("showroom_investment", Number.parseFloat(e.target.value) || 0)}
+                  placeholder="0.00"
+                />
+              </div>
+
+              {/* Ownership Type */}
+              <div className="space-y-2">
+                <Label htmlFor="ownership_type">Car Ownership Type</Label>
+                <select
+                  id="ownership_type"
+                  value={formData.ownership_type}
+                  onChange={(e) => handleInputChange("ownership_type", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="fully_showroom_owned">Fully Showroom Owned</option>
+                  <option value="partially_owned">Partially Owned (Showroom + Investors)</option>
+                  <option value="fully_investor_owned">Fully Investor-Owned</option>
+                </select>
+              </div>
+
+              {/* Commission Settings for Fully Investor-Owned */}
+              {formData.ownership_type === 'fully_investor_owned' && (
+                <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
+                  <h4 className="font-medium text-blue-900">Commission Configuration</h4>
+                  <div className="space-y-2">
+                    <Label htmlFor="commission_type">Commission Type</Label>
+                    <select
+                      id="commission_type"
+                      value={formData.commission_type}
+                      onChange={(e) => handleInputChange("commission_type", e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="flat">Flat Amount</option>
+                      <option value="percentage">Percentage</option>
+                    </select>
+                  </div>
+
+                  {formData.commission_type === 'flat' ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="commission_amount">Commission Amount</Label>
+                      <Input
+                        id="commission_amount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={formData.commission_amount}
+                        onChange={(e) => handleInputChange("commission_amount", Number.parseFloat(e.target.value) || 0)}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="commission_percentage">Commission Percentage</Label>
+                      <div className="relative">
+                        <Input
+                          id="commission_percentage"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={formData.commission_percentage}
+                          onChange={(e) => handleInputChange("commission_percentage", Number.parseFloat(e.target.value) || 0)}
+                          placeholder="0.0"
+                          className="pr-8"
+                        />
+                        <Percent className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Investors Section - Only show for partially owned and fully investor owned */}
+              {formData.ownership_type !== 'fully_showroom_owned' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium">Investors</Label>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setIsInvestorModalOpen(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Investor
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={handleAddInvestor}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add to List
+                    </Button>
+                  </div>
+                </div>
+
+                {investors.length > 0 && (
+                  <div className="space-y-4">
+                    {investors.map((investor, index) => (
+                      <div key={index} className="p-4 border rounded-lg space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-medium">Investor {index + 1}</h5>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveInvestor(index)}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Select Existing Investor (Optional)</Label>
+                          <select
+                            value={investor.id || ""}
+                            onChange={(e) => selectExistingInvestor(index, e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">Select existing investor or add new</option>
+                            {availableInvestors.map((inv) => (
+                              <option key={inv.id} value={inv.id}>
+                                {inv.name} ({inv.cnic})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label>Full Name *</Label>
+                            <Input
+                              value={investor.name}
+                              onChange={(e) => handleInvestorChange(index, 'name', e.target.value)}
+                              placeholder="Investor name"
+                              required
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>CNIC / National ID *</Label>
+                            <Input
+                              value={investor.cnic}
+                              onChange={(e) => handleInvestorChange(index, 'cnic', e.target.value)}
+                              placeholder="42101-1234567-1"
+                              required
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Investment Amount *</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={investor.investment_amount}
+                              onChange={(e) => handleInvestorChange(index, 'investment_amount', Number.parseFloat(e.target.value) || 0)}
+                              placeholder="0.00"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Investment Summary */}
+                {(formData.showroom_investment > 0 || investors.length > 0) && (
+                  <div className="p-4 bg-gray-50 rounded-lg">
+                    <h5 className="font-medium mb-3">Investment Summary</h5>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Showroom Investment:</span>
+                        <span className="font-medium">₨{formData.showroom_investment.toLocaleString()}</span>
+                      </div>
+                      {investors.map((investor, index) => (
+                        <div key={index} className="flex justify-between">
+                          <span>{investor.name || `Investor ${index + 1}`}:</span>
+                          <span className="font-medium">₨{(investor.investment_amount || 0).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      <div className="border-t pt-2 flex justify-between font-semibold">
+                        <span>Total Investment:</span>
+                        <span>₨{getTotalInvestment().toLocaleString()}</span>
+                      </div>
+                      {formData.ownership_type === 'partially_owned' && getTotalInvestment() > 0 && (
+                        <div className="flex justify-between text-blue-600">
+                          <span>Showroom Ownership:</span>
+                          <span>{getShowroomOwnershipPercentage().toFixed(1)}%</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              )}
             </CardContent>
           </Card>
 
@@ -837,6 +1399,223 @@ Grade Scale:
             </Button>
           </div>
         </form>
+
+        {/* Add Seller Modal */}
+        <Dialog open={isSellerModalOpen} onOpenChange={setIsSellerModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add New Seller</DialogTitle>
+              <DialogDescription>
+                Enter the seller information to add them to your system
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleCreateSeller} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="seller-name">Full Name *</Label>
+                <Input
+                  id="seller-name"
+                  value={sellerForm.name}
+                  onChange={(e) => setSellerForm({ ...sellerForm, name: e.target.value })}
+                  placeholder="Enter seller's full name"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="seller-cnic">CNIC / National ID *</Label>
+                <Input
+                  id="seller-cnic"
+                  value={sellerForm.cnic}
+                  onChange={(e) => setSellerForm({ ...sellerForm, cnic: e.target.value })}
+                  placeholder="42101-1234567-1"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="seller-phone">Phone Number *</Label>
+                <Input
+                  id="seller-phone"
+                  value={sellerForm.phone}
+                  onChange={(e) => setSellerForm({ ...sellerForm, phone: e.target.value })}
+                  placeholder="+92-300-1234567"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="seller-email">Email</Label>
+                <Input
+                  id="seller-email"
+                  type="email"
+                  value={sellerForm.email}
+                  onChange={(e) => setSellerForm({ ...sellerForm, email: e.target.value })}
+                  placeholder="seller@example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="seller-address">Address</Label>
+                <Input
+                  id="seller-address"
+                  value={sellerForm.address}
+                  onChange={(e) => setSellerForm({ ...sellerForm, address: e.target.value })}
+                  placeholder="City, Country"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => setIsSellerModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Add Seller</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Dealer Modal */}
+        <Dialog open={isDealerModalOpen} onOpenChange={setIsDealerModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add New Dealer</DialogTitle>
+              <DialogDescription>
+                Enter the dealer information to add them to your system
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleCreateDealer} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="dealer-name">Full Name *</Label>
+                <Input
+                  id="dealer-name"
+                  value={dealerForm.name}
+                  onChange={(e) => setDealerForm({ ...dealerForm, name: e.target.value })}
+                  placeholder="Enter dealer's full name"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dealer-cnic">CNIC / National ID *</Label>
+                <Input
+                  id="dealer-cnic"
+                  value={dealerForm.cnic}
+                  onChange={(e) => setDealerForm({ ...dealerForm, cnic: e.target.value })}
+                  placeholder="42101-1234567-1"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dealer-phone">Phone Number *</Label>
+                <Input
+                  id="dealer-phone"
+                  value={dealerForm.phone}
+                  onChange={(e) => setDealerForm({ ...dealerForm, phone: e.target.value })}
+                  placeholder="+92-300-1234567"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dealer-email">Email</Label>
+                <Input
+                  id="dealer-email"
+                  type="email"
+                  value={dealerForm.email}
+                  onChange={(e) => setDealerForm({ ...dealerForm, email: e.target.value })}
+                  placeholder="dealer@example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dealer-address">Address *</Label>
+                <Input
+                  id="dealer-address"
+                  value={dealerForm.address}
+                  onChange={(e) => setDealerForm({ ...dealerForm, address: e.target.value })}
+                  placeholder="Business address"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dealer-license">License Number</Label>
+                <Input
+                  id="dealer-license"
+                  value={dealerForm.license_number}
+                  onChange={(e) => setDealerForm({ ...dealerForm, license_number: e.target.value })}
+                  placeholder="Dealer license number"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => setIsDealerModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Add Dealer</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Investor Modal */}
+        <Dialog open={isInvestorModalOpen} onOpenChange={setIsInvestorModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add New Investor</DialogTitle>
+              <DialogDescription>
+                Enter the investor information to add them to your system
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleCreateInvestor} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="investor-name">Full Name *</Label>
+                <Input
+                  id="investor-name"
+                  value={investorForm.name}
+                  onChange={(e) => setInvestorForm({ ...investorForm, name: e.target.value })}
+                  placeholder="Enter investor's full name"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="investor-cnic">CNIC / National ID *</Label>
+                <Input
+                  id="investor-cnic"
+                  value={investorForm.cnic}
+                  onChange={(e) => setInvestorForm({ ...investorForm, cnic: e.target.value })}
+                  placeholder="42101-1234567-1"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="investor-phone">Phone Number *</Label>
+                <Input
+                  id="investor-phone"
+                  value={investorForm.phone}
+                  onChange={(e) => setInvestorForm({ ...investorForm, phone: e.target.value })}
+                  placeholder="+92-300-1234567"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="investor-email">Email</Label>
+                <Input
+                  id="investor-email"
+                  type="email"
+                  value={investorForm.email}
+                  onChange={(e) => setInvestorForm({ ...investorForm, email: e.target.value })}
+                  placeholder="investor@example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="investor-address">Address</Label>
+                <Input
+                  id="investor-address"
+                  value={investorForm.address}
+                  onChange={(e) => setInvestorForm({ ...investorForm, address: e.target.value })}
+                  placeholder="City, Country"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => setIsInvestorModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Add Investor</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
