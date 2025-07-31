@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   ArrowLeft,
   Building2,
@@ -16,7 +21,13 @@ import {
   Calendar,
   TrendingUp,
   Users,
+  Plus,
+  CheckCircle,
+  FileText,
+  Download,
+  Trash2,
 } from "lucide-react"
+import { getSellerDebts, createSellerDebt, settleSellerDebt, deleteSellerDebt, type SellerDebt } from "@/lib/supabase-client"
 
 interface SellerDetail {
   id: string
@@ -54,18 +65,54 @@ export default function SellerDetailPage() {
 
   const [seller, setSeller] = useState<SellerDetail | null>(null)
   const [transactions, setTransactions] = useState<SaleTransaction[]>([])
+  const [debts, setDebts] = useState<SellerDebt[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [activeTab, setActiveTab] = useState("overview")
+
+  // Debt modal states
+  const [isDebtModalOpen, setIsDebtModalOpen] = useState(false)
+  const [isSettleModalOpen, setIsSettleModalOpen] = useState(false)
+  const [settlingDebt, setSettlingDebt] = useState<SellerDebt | null>(null)
+  const [debtForm, setDebtForm] = useState({
+    amount: "",
+    type: "owed_to_client" as "owed_to_client" | "owed_by_client",
+    description: "",
+  })
 
   useEffect(() => {
     loadSellerDetails()
+    loadDebts()
   }, [sellerId])
+
+  const loadDebts = async () => {
+    try {
+      const clientId = localStorage.getItem("clientId")
+      if (!clientId) return
+
+      const debtsData = await getSellerDebts(clientId)
+      // Filter debts for this specific seller
+      const sellerDebts = debtsData.filter(debt => debt.seller_id === sellerId)
+      setDebts(sellerDebts)
+    } catch (error: any) {
+      console.error("Error loading debts:", error)
+      // Check if it's a table missing error
+      if (error.message?.includes('does not exist') || error.message?.includes('contact administrator')) {
+        console.warn("Debt tables not set up yet, showing empty debt list")
+        setDebts([])
+        // Don't show error to user for missing tables
+      } else {
+        setError(`Failed to load debts: ${error.message}`)
+      }
+    }
+  }
 
   const loadSellerDetails = async () => {
     try {
       setLoading(true)
       setError("")
-      
+
       // Mock data - replace with actual API calls
       const mockSeller: SellerDetail = {
         id: sellerId,
@@ -155,6 +202,76 @@ export default function SellerDetailPage() {
         return "bg-yellow-100 text-yellow-800"
       default:
         return "bg-gray-100 text-gray-800"
+    }
+  }
+
+  const handleCreateDebt = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      const clientId = localStorage.getItem("clientId")
+      if (!clientId) {
+        setError("Client ID not found")
+        return
+      }
+
+      setError("")
+      setSuccess("")
+
+      if (!debtForm.amount || !debtForm.description) {
+        setError("Please fill in all required fields")
+        return
+      }
+
+      await createSellerDebt({
+        client_id: clientId,
+        seller_id: sellerId,
+        amount: parseFloat(debtForm.amount),
+        type: debtForm.type,
+        description: debtForm.description,
+      })
+
+      setSuccess("Debt record created successfully!")
+      setIsDebtModalOpen(false)
+      setDebtForm({ amount: "", type: "owed_to_client", description: "" })
+      await loadDebts()
+    } catch (error: any) {
+      setError(`Failed to create debt: ${error.message}`)
+    }
+  }
+
+  const handleSettleDebt = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!settlingDebt) return
+
+    try {
+      setError("")
+      setSuccess("")
+
+      await settleSellerDebt(settlingDebt.id, {
+        is_settled: true,
+        settled_date: new Date().toISOString().split('T')[0],
+        settled_amount: settlingDebt.amount,
+      })
+
+      setSuccess("Debt settled successfully!")
+      setIsSettleModalOpen(false)
+      setSettlingDebt(null)
+      await loadDebts()
+    } catch (error: any) {
+      setError(`Failed to settle debt: ${error.message}`)
+    }
+  }
+
+  const handleDeleteDebt = async (debtId: string) => {
+    if (!confirm("Are you sure you want to delete this debt record?")) return
+
+    try {
+      setError("")
+      await deleteSellerDebt(debtId)
+      setSuccess("Debt record deleted successfully!")
+      await loadDebts()
+    } catch (error: any) {
+      setError(`Failed to delete debt: ${error.message}`)
     }
   }
 
@@ -298,80 +415,271 @@ export default function SellerDetailPage() {
           </Card>
         </div>
 
-        {/* Transaction History */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Car Purchase History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {transactions.length === 0 ? (
-              <div className="text-center py-8">
-                <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">No transactions found</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {transactions.map((transaction) => (
-                  <div key={transaction.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-medium text-gray-900">
-                            {transaction.car_make} {transaction.car_model} {transaction.car_year}
-                          </h4>
-                          <Badge className={getStatusColor(transaction.status)}>
-                            {transaction.status}
-                          </Badge>
-                          <span className="text-sm text-gray-600">{transaction.registration_number}</span>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                          <div>
-                            <span className="text-gray-600">Purchase Price:</span>
-                            <div className="font-medium">{formatCurrency(transaction.purchase_price)}</div>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Asking Price:</span>
-                            <div className="font-medium">{formatCurrency(transaction.asking_price)}</div>
-                          </div>
-                          {transaction.status === "sold" && transaction.sold_price && (
-                            <div>
-                              <span className="text-gray-600">Sold Price:</span>
-                              <div className="font-medium text-green-600">{formatCurrency(transaction.sold_price)}</div>
-                            </div>
-                          )}
-                          <div>
-                            <span className="text-gray-600">Purchase Date:</span>
-                            <div className="font-medium">{formatDate(transaction.sale_date)}</div>
-                          </div>
-                          {transaction.status === "sold" && transaction.sold_price && (
-                            <div>
-                              <span className="text-gray-600">Profit:</span>
-                              <div className="font-medium text-green-600">
-                                {formatCurrency(transaction.sold_price - transaction.purchase_price)}
-                              </div>
-                            </div>
-                          )}
-                        </div>
+        {/* Success/Error Messages */}
+        {success && (
+          <Alert className="mb-6 border-green-200 bg-green-50">
+            <CheckCircle className="h-4 w-4 text-green-600" />
+            <AlertDescription className="text-green-800">{success}</AlertDescription>
+          </Alert>
+        )}
 
-                        {transaction.status === "sold" && transaction.sold_price && (
-                          <div className="mt-3 pt-3 border-t">
-                            <div className="flex justify-between text-sm">
-                              <span className="text-gray-600">Profit margin:</span>
-                              <span className="font-medium text-green-600">
-                                {(((transaction.sold_price - transaction.purchase_price) / transaction.purchase_price) * 100).toFixed(1)}%
-                              </span>
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Tabbed Interface */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="overview">Car History</TabsTrigger>
+            <TabsTrigger value="debts">Debts & Payments</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview">
+            <Card>
+              <CardHeader>
+                <CardTitle>Car Purchase History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {transactions.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">No transactions found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {transactions.map((transaction) => (
+                      <div key={transaction.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h4 className="font-medium text-gray-900">
+                                {transaction.car_make} {transaction.car_model} {transaction.car_year}
+                              </h4>
+                              <Badge className={getStatusColor(transaction.status)}>
+                                {transaction.status}
+                              </Badge>
+                              <span className="text-sm text-gray-600">{transaction.registration_number}</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-600">Purchase Price:</span>
+                                <div className="font-medium">{formatCurrency(transaction.purchase_price)}</div>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Asking Price:</span>
+                                <div className="font-medium">{formatCurrency(transaction.asking_price)}</div>
+                              </div>
+                              {transaction.status === "sold" && transaction.sold_price && (
+                                <div>
+                                  <span className="text-gray-600">Sold Price:</span>
+                                  <div className="font-medium text-green-600">{formatCurrency(transaction.sold_price)}</div>
+                                </div>
+                              )}
+                              <div>
+                                <span className="text-gray-600">Purchase Date:</span>
+                                <div className="font-medium">{formatDate(transaction.sale_date)}</div>
+                              </div>
+                              {transaction.status === "sold" && transaction.sold_price && (
+                                <div>
+                                  <span className="text-gray-600">Profit:</span>
+                                  <div className="font-medium text-green-600">
+                                    {formatCurrency(transaction.sold_price - transaction.purchase_price)}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {transaction.status === "sold" && transaction.sold_price && (
+                              <div className="mt-3 pt-3 border-t">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-600">Profit margin:</span>
+                                  <span className="font-medium text-green-600">
+                                    {(((transaction.sold_price - transaction.purchase_price) / transaction.purchase_price) * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="debts">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Debts & Payments</CardTitle>
+                <Button onClick={() => setIsDebtModalOpen(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Debt Record
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {debts.length === 0 ? (
+                  <div className="text-center py-8">
+                    <DollarSign className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">No debt records found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {debts.map((debt) => (
+                      <div key={debt.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <Badge variant={debt.type === "owed_to_client" ? "destructive" : "secondary"}>
+                                {debt.type === "owed_to_client" ? "Owes to me" : "I owe"}
+                              </Badge>
+                              <span className="font-medium">{formatCurrency(debt.amount)}</span>
+                              {debt.is_settled && (
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                  Settled
+                                </Badge>
+                              )}
+                            </div>
+
+                            <p className="text-sm text-gray-600 mb-2">{debt.description}</p>
+
+                            <div className="flex justify-between text-xs text-gray-500">
+                              <span>Created: {formatDate(debt.created_at)}</span>
+                              {debt.settled_date && (
+                                <span>Settled: {formatDate(debt.settled_date)}</span>
+                              )}
                             </div>
                           </div>
-                        )}
+
+                          <div className="flex gap-2 ml-4">
+                            {!debt.is_settled && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSettlingDebt(debt)
+                                  setIsSettleModalOpen(true)
+                                }}
+                              >
+                                <CheckCircle className="w-4 h-4 mr-1" />
+                                Settle
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteDebt(debt.id)}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
+        {/* Add Debt Modal */}
+        <Dialog open={isDebtModalOpen} onOpenChange={setIsDebtModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add Debt Record</DialogTitle>
+              <DialogDescription>
+                Record a debt transaction with {seller.name}
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleCreateDebt} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="debt-amount">Amount *</Label>
+                <Input
+                  id="debt-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={debtForm.amount}
+                  onChange={(e) => setDebtForm({ ...debtForm, amount: e.target.value })}
+                  placeholder="0.00"
+                  required
+                />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="debt-type">Debt Type *</Label>
+                <select
+                  id="debt-type"
+                  value={debtForm.type}
+                  onChange={(e) => setDebtForm({ ...debtForm, type: e.target.value as "owed_to_client" | "owed_by_client" })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                >
+                  <option value="owed_to_client">{seller.name} owes to me</option>
+                  <option value="owed_by_client">I owe to {seller.name}</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="debt-description">Description *</Label>
+                <Textarea
+                  id="debt-description"
+                  value={debtForm.description}
+                  onChange={(e) => setDebtForm({ ...debtForm, description: e.target.value })}
+                  placeholder="Describe the debt transaction..."
+                  rows={3}
+                  required
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => setIsDebtModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Add Debt Record</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Settle Debt Modal */}
+        <Dialog open={isSettleModalOpen} onOpenChange={setIsSettleModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Settle Debt</DialogTitle>
+              <DialogDescription>
+                Mark this debt as settled
+              </DialogDescription>
+            </DialogHeader>
+            {settlingDebt && (
+              <form onSubmit={handleSettleDebt} className="space-y-4">
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Original Amount:</span>
+                    <span className="font-medium">{formatCurrency(settlingDebt.amount)}</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-sm text-gray-600">Type:</span>
+                    <Badge variant={settlingDebt.type === "owed_to_client" ? "destructive" : "secondary"}>
+                      {settlingDebt.type === "owed_to_client" ? "Owes to me" : "I owe"}
+                    </Badge>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-600">{settlingDebt.description}</p>
+                <div className="flex justify-end space-x-2">
+                  <Button type="button" variant="outline" onClick={() => setIsSettleModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit">Mark as Settled</Button>
+                </div>
+              </form>
             )}
-          </CardContent>
-        </Card>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

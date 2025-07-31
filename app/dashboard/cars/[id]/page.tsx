@@ -8,10 +8,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ArrowLeft, Car, DollarSign, FileText, MessageCircle, Download, Edit, Gauge, AlertCircle } from "lucide-react"
-import { getCarById, getFileUrl, type Car as CarType } from "@/lib/supabase-client"
+import { getCarById, getCarInvestments, getFileUrl, type Car as CarType } from "@/lib/supabase-client"
 
 export default function CarDetailPage({ params }: { params: { id: string } }) {
   const [car, setCar] = useState<CarType | null>(null)
+  const [carInvestments, setCarInvestments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -32,6 +33,16 @@ export default function CarDetailPage({ params }: { params: { id: string } }) {
       setError("")
       const carData = await getCarById(params.id)
       setCar(carData)
+
+      // Load investment data
+      try {
+        const investments = await getCarInvestments(params.id)
+        setCarInvestments(investments)
+      } catch (investmentError) {
+        console.error("Error loading car investments:", investmentError)
+        // Don't fail the whole page if investments fail to load
+        setCarInvestments([])
+      }
     } catch (error: any) {
       console.error("Error loading car details:", error)
       setError(`Failed to load car details: ${error.message}`)
@@ -77,7 +88,7 @@ export default function CarDetailPage({ params }: { params: { id: string } }) {
 
   const calculateProfit = () => {
     if (car.status === "sold") {
-      return car.asking_price - car.purchase_price - (car.dealer_commission || 0)
+      return car.asking_price - car.purchase_price - (car.purchase_commission || 0) - (car.dealer_commission || 0)
     }
     return 0
   }
@@ -669,14 +680,102 @@ export default function CarDetailPage({ params }: { params: { id: string } }) {
                         </div>
                       </>
                     )}
+                    {car.purchase_commission && (
+                      <div>
+                        <Label className="text-sm font-medium text-gray-500">Purchase Commission</Label>
+                        <p className="text-lg font-semibold">{formatCurrency(car.purchase_commission)}</p>
+                      </div>
+                    )}
                     {car.dealer_commission && (
                       <div>
-                        <Label className="text-sm font-medium text-gray-500">Dealer Commission</Label>
+                        <Label className="text-sm font-medium text-gray-500">Sale Commission</Label>
                         <p className="text-lg font-semibold">{formatCurrency(car.dealer_commission)}</p>
                       </div>
                     )}
                   </div>
                 </div>
+
+                {/* Investment & Ownership Information */}
+                {(car.ownership_type !== 'fully_showroom_owned' || (car.showroom_investment && car.showroom_investment > 0)) && (
+                  <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <Label className="text-sm font-medium text-blue-800 mb-3 block">Investment & Ownership Structure</Label>
+
+                    <div className="space-y-3">
+                      {/* Ownership Type */}
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Ownership Type:</span>
+                        <Badge variant="outline" className="bg-white">
+                          {car.ownership_type === 'fully_showroom_owned' && 'Fully Showroom Owned'}
+                          {car.ownership_type === 'partially_owned' && 'Partially Owned (Showroom + Investors)'}
+                          {car.ownership_type === 'fully_investor_owned' && 'Fully Investor-Owned'}
+                        </Badge>
+                      </div>
+
+                      {/* Showroom Investment */}
+                      {car.showroom_investment && car.showroom_investment > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-600">Showroom Investment:</span>
+                          <span className="font-semibold text-blue-700">{formatCurrency(car.showroom_investment)}</span>
+                        </div>
+                      )}
+
+                      {/* Investors List */}
+                      {carInvestments.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-sm text-gray-600 border-t pt-2">Investors:</div>
+                          {carInvestments.map((investment, index) => (
+                            <div key={index} className="flex justify-between items-center bg-white p-2 rounded border">
+                              <div className="flex-1">
+                                <div className="font-medium text-sm">{investment.investor?.name || 'Unknown Investor'}</div>
+                                <div className="text-xs text-gray-500">{investment.investor?.cnic || 'No CNIC'}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-semibold text-green-600">{formatCurrency(investment.investment_amount)}</div>
+                                <div className="text-xs text-gray-500">{investment.ownership_percentage?.toFixed(1) || '0'}% ownership</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Total Investment Summary */}
+                      {(() => {
+                        const totalInvestment = (car.showroom_investment || 0) + carInvestments.reduce((sum, inv) => sum + (inv.investment_amount || 0), 0)
+                        const showroomPercentage = totalInvestment > 0 ? ((car.showroom_investment || 0) / totalInvestment) * 100 : 0
+
+                        return totalInvestment > 0 && (
+                          <div className="border-t pt-2">
+                            <div className="flex justify-between items-center font-semibold">
+                              <span className="text-sm text-gray-700">Total Investment:</span>
+                              <span className="text-blue-700">{formatCurrency(totalInvestment)}</span>
+                            </div>
+                            {car.ownership_type === 'partially_owned' && showroomPercentage > 0 && (
+                              <div className="flex justify-between items-center text-xs text-gray-600 mt-1">
+                                <span>Showroom Share:</span>
+                                <span>{showroomPercentage.toFixed(1)}%</span>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {/* Commission Settings for Fully Investor-Owned */}
+                      {car.ownership_type === 'fully_investor_owned' && (
+                        <div className="border-t pt-2">
+                          <div className="text-sm text-gray-600 mb-1">Showroom Commission:</div>
+                          <div className="text-sm">
+                            {car.commission_type === 'flat' ? (
+                              <span className="font-medium">Flat Amount: {formatCurrency(car.commission_amount || 0)}</span>
+                            ) : (
+                              <span className="font-medium">Percentage: {car.commission_percentage || 0}%</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {car.description && (
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Description</Label>

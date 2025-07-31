@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   ArrowLeft,
   TrendingUp,
@@ -16,7 +21,13 @@ import {
   Calendar,
   Percent,
   Building2,
+  Plus,
+  CheckCircle,
+  FileText,
+  Download,
+  Trash2,
 } from "lucide-react"
+import { getInvestorDebts, createInvestorDebt, settleInvestorDebt, deleteInvestorDebt, type InvestorDebt } from "@/lib/supabase-client"
 
 interface InvestorDetail {
   id: string
@@ -53,12 +64,48 @@ export default function InvestorDetailPage() {
 
   const [investor, setInvestor] = useState<InvestorDetail | null>(null)
   const [investments, setInvestments] = useState<Investment[]>([])
+  const [debts, setDebts] = useState<InvestorDebt[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [activeTab, setActiveTab] = useState("overview")
+
+  // Debt modal states
+  const [isDebtModalOpen, setIsDebtModalOpen] = useState(false)
+  const [isSettleModalOpen, setIsSettleModalOpen] = useState(false)
+  const [settlingDebt, setSettlingDebt] = useState<InvestorDebt | null>(null)
+  const [debtForm, setDebtForm] = useState({
+    amount: "",
+    type: "owed_to_client" as "owed_to_client" | "owed_by_client",
+    description: "",
+  })
 
   useEffect(() => {
     loadInvestorDetails()
+    loadDebts()
   }, [investorId])
+
+  const loadDebts = async () => {
+    try {
+      const clientId = localStorage.getItem("clientId")
+      if (!clientId) return
+
+      const debtsData = await getInvestorDebts(clientId)
+      // Filter debts for this specific investor
+      const investorDebts = debtsData.filter(debt => debt.investor_id === investorId)
+      setDebts(investorDebts)
+    } catch (error: any) {
+      console.error("Error loading debts:", error)
+      // Check if it's a table missing error
+      if (error.message?.includes('does not exist') || error.message?.includes('contact administrator')) {
+        console.warn("Debt tables not set up yet, showing empty debt list")
+        setDebts([])
+        // Don't show error to user for missing tables
+      } else {
+        setError(`Failed to load debts: ${error.message}`)
+      }
+    }
+  }
 
   const loadInvestorDetails = async () => {
     try {
@@ -138,6 +185,76 @@ export default function InvestorDetailPage() {
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-PK")
+  }
+
+  const handleCreateDebt = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      const clientId = localStorage.getItem("clientId")
+      if (!clientId) {
+        setError("Client ID not found")
+        return
+      }
+
+      setError("")
+      setSuccess("")
+
+      if (!debtForm.amount || !debtForm.description) {
+        setError("Please fill in all required fields")
+        return
+      }
+
+      await createInvestorDebt({
+        client_id: clientId,
+        investor_id: investorId,
+        amount: parseFloat(debtForm.amount),
+        type: debtForm.type,
+        description: debtForm.description,
+      })
+
+      setSuccess("Debt record created successfully!")
+      setIsDebtModalOpen(false)
+      setDebtForm({ amount: "", type: "owed_to_client", description: "" })
+      await loadDebts()
+    } catch (error: any) {
+      setError(`Failed to create debt: ${error.message}`)
+    }
+  }
+
+  const handleSettleDebt = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!settlingDebt) return
+
+    try {
+      setError("")
+      setSuccess("")
+
+      await settleInvestorDebt(settlingDebt.id, {
+        is_settled: true,
+        settled_date: new Date().toISOString().split('T')[0],
+        settled_amount: settlingDebt.amount,
+      })
+
+      setSuccess("Debt settled successfully!")
+      setIsSettleModalOpen(false)
+      setSettlingDebt(null)
+      await loadDebts()
+    } catch (error: any) {
+      setError(`Failed to settle debt: ${error.message}`)
+    }
+  }
+
+  const handleDeleteDebt = async (debtId: string) => {
+    if (!confirm("Are you sure you want to delete this debt record?")) return
+
+    try {
+      setError("")
+      await deleteInvestorDebt(debtId)
+      setSuccess("Debt record deleted successfully!")
+      await loadDebts()
+    } catch (error: any) {
+      setError(`Failed to delete debt: ${error.message}`)
+    }
   }
 
   if (loading) {

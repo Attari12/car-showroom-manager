@@ -18,7 +18,8 @@ export interface CarSaleData {
   purchase_price: number
   sold_price: number
   additional_expenses?: number // repairs, maintenance, etc.
-  dealer_commission?: number
+  purchase_commission?: number // commission paid at time of purchase
+  dealer_commission?: number // commission paid at time of sale (sale commission)
   investment: CarInvestment
 }
 
@@ -52,7 +53,7 @@ export function calculateTotalInvestment(investment: CarInvestment): number {
  * Calculate base profit before distribution
  */
 export function calculateBaseProfit(saleData: CarSaleData): number {
-  return saleData.sold_price - saleData.purchase_price - (saleData.additional_expenses || 0) - (saleData.dealer_commission || 0)
+  return saleData.sold_price - saleData.purchase_price - (saleData.additional_expenses || 0) - (saleData.purchase_commission || 0) - (saleData.dealer_commission || 0)
 }
 
 /**

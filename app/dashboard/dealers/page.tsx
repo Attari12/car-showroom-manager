@@ -21,7 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye, Download } from "lucide-react"
-import { getDealers, getCars, createDealer, getFileUrl } from "@/lib/supabase-client"
+import { getDealers, getCars, createDealer, getFileUrl, getDealerDebts } from "@/lib/supabase-client"
 
 interface Dealer {
   id: string
@@ -35,15 +35,20 @@ interface Dealer {
 
 interface DealerDebt {
   id: string
-  dealerId: string
+  dealer_id: string
   amount: number
   type: "owed_to_client" | "owed_by_client"
   description: string
-  createdAt: string
-  documents: string[]
-  isSettled: boolean
-  settledDate?: string
-  settledAmount?: number
+  created_at: string
+  documents?: string[]
+  is_settled: boolean
+  settled_date?: string
+  settled_amount?: number
+  dealer?: {
+    name: string
+    cnic: string
+    phone: string
+  }
 }
 
 interface CarDeal {
@@ -81,10 +86,11 @@ export default function DealersPage() {
       setLoading(true)
       setError("")
 
-      // Load dealers and cars in parallel
-      const [dealersData, carsData] = await Promise.all([
+      // Load dealers, cars, and dealer debts in parallel
+      const [dealersData, carsData, dealerDebtsData] = await Promise.all([
         getDealers(clientId),
-        getCars(clientId)
+        getCars(clientId),
+        getDealerDebts(clientId)
       ])
 
       // Calculate deal statistics for each dealer
@@ -118,6 +124,7 @@ export default function DealersPage() {
 
       setDealers(transformedDealers)
       setCarDeals(allCarDeals)
+      setDealerDebts(dealerDebtsData || [])
     } catch (error: any) {
       console.error("Error loading dealers:", error)
       setError(`Failed to load dealers: ${error.message}`)
@@ -147,6 +154,7 @@ export default function DealersPage() {
 
   const [isAddDealerOpen, setIsAddDealerOpen] = useState(false)
   const [isAddDebtOpen, setIsAddDebtOpen] = useState(false)
+  const [isAddingDebt, setIsAddingDebt] = useState(false)
   const [selectedDealer, setSelectedDealer] = useState<Dealer | null>(null)
   const [debtDocuments, setDebtDocuments] = useState<File[]>([])
   const [searchTerm, setSearchTerm] = useState("")
@@ -168,9 +176,9 @@ export default function DealersPage() {
         debt.id === selectedDebtForSettlement.id
           ? {
               ...debt,
-              isSettled: true,
-              settledDate: settlementData.settledDate,
-              settledAmount: Number.parseFloat(settlementData.settledAmount),
+              is_settled: true,
+              settled_date: settlementData.settledDate,
+              settled_amount: Number.parseFloat(settlementData.settledAmount),
             }
           : debt,
       )
@@ -199,7 +207,7 @@ export default function DealersPage() {
   })
 
   const filteredDealerDebts = dealerDebts.filter((debt) => {
-    const dealer = dealers.find((d) => d.id === debt.dealerId)
+    const dealer = debt.dealer || dealers.find((d) => d.id === debt.dealer_id)
     return (
       dealer?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       debt.description.toLowerCase().includes(searchTerm.toLowerCase())
@@ -247,28 +255,58 @@ export default function DealersPage() {
     }
   }
 
-  const handleAddDebt = () => {
-    if (newDebt.dealerId && newDebt.amount && newDebt.description) {
+  const handleAddDebt = async () => {
+    if (isAddingDebt) return // Prevent double-clicks
+
+    // Validate required fields
+    if (!newDebt.dealerId) {
+      alert("Please select a dealer")
+      return
+    }
+
+    if (!newDebt.amount || Number.parseFloat(newDebt.amount) <= 0) {
+      alert("Please enter a valid amount")
+      return
+    }
+
+    if (!newDebt.description.trim()) {
+      alert("Please enter a description")
+      return
+    }
+
+    setIsAddingDebt(true)
+
+    try {
       const debt: DealerDebt = {
         id: Date.now().toString(),
-        dealerId: newDebt.dealerId,
+        dealer_id: newDebt.dealerId,
         amount: Number.parseFloat(newDebt.amount),
         type: newDebt.type,
-        description: newDebt.description,
-        createdAt: new Date().toISOString().split("T")[0],
+        description: newDebt.description.trim(),
+        created_at: new Date().toISOString(),
         documents: debtDocuments.map((file) => file.name),
-        isSettled: false,
+        is_settled: false,
       }
+
+      console.log("Creating debt:", debt)
       setDealerDebts([...dealerDebts, debt])
       setNewDebt({ dealerId: "", amount: "", type: "owed_to_client", description: "" })
       setDebtDocuments([])
       setIsAddDebtOpen(false)
+
+      // Show success message
+      alert("Debt record added successfully!")
+    } catch (error) {
+      console.error("Error adding debt:", error)
+      alert("Error adding debt record. Please try again.")
+    } finally {
+      setIsAddingDebt(false)
     }
   }
 
   const handleDeleteDealer = (id: string) => {
     setDealers(dealers.filter((dealer) => dealer.id !== id))
-    setDealerDebts(dealerDebts.filter((debt) => debt.dealerId !== id))
+    setDealerDebts(dealerDebts.filter((debt) => debt.dealer_id !== id))
     setCarDeals(carDeals.filter((deal) => deal.dealerId !== id))
   }
 
@@ -287,7 +325,7 @@ export default function DealersPage() {
   }
 
   const getDealerDebts = (dealerId: string) => {
-    return dealerDebts.filter((debt) => debt.dealerId === dealerId && !debt.isSettled)
+    return dealerDebts.filter((debt) => debt.dealer_id === dealerId && !debt.is_settled)
   }
 
   const getDealerDeals = (dealerId: string) => {
@@ -298,7 +336,7 @@ export default function DealersPage() {
     try {
       // Check if URL is valid
       if (!url || url === "/placeholder.svg") {
-        alert("File not available for download.")
+        alert("Document file not found. The document may not have been uploaded yet or the file path is incorrect.")
         return
       }
 
@@ -307,6 +345,9 @@ export default function DealersPage() {
         const response = await fetch(url)
 
         if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error(`Document not found (404). The file may not exist in storage or the path is incorrect.`)
+          }
           throw new Error(`HTTP error! status: ${response.status}`)
         }
 
@@ -337,7 +378,8 @@ export default function DealersPage() {
       }
     } catch (error) {
       console.error("Error downloading file:", error)
-      alert("Error downloading file. The file may not exist or is not accessible.")
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      alert(`Download failed: ${errorMessage}`)
     }
   }
 
@@ -345,7 +387,7 @@ export default function DealersPage() {
     try {
       // Check if URL is valid
       if (!url || url === "/placeholder.svg") {
-        alert("File not available for viewing.")
+        alert("Document file not found. The document may not have been uploaded yet or the file path is incorrect.")
         return
       }
 
@@ -374,7 +416,8 @@ export default function DealersPage() {
       }
     } catch (error) {
       console.error("Error viewing file:", error)
-      alert("Error opening file. The file may not exist or is not accessible.")
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      alert(`View failed: ${errorMessage}`)
     }
   }
 
@@ -685,14 +728,16 @@ export default function DealersPage() {
                         <DialogTitle>Add Debt Record</DialogTitle>
                         <DialogDescription>Record a new debt or commission payment</DialogDescription>
                       </DialogHeader>
-                      <div className="space-y-4">
+                      <form onSubmit={(e) => { e.preventDefault(); handleAddDebt(); }} className="space-y-4">
                         <div className="space-y-2">
                           <Label htmlFor="debt-dealer">Select Dealer</Label>
                           <select
                             id="debt-dealer"
+                            name="dealerId"
                             value={newDebt.dealerId}
                             onChange={(e) => setNewDebt({ ...newDebt, dealerId: e.target.value })}
                             className="w-full p-2 border rounded-md"
+                            required
                           >
                             <option value="">Select a dealer</option>
                             {dealers.map((dealer) => (
@@ -706,21 +751,27 @@ export default function DealersPage() {
                           <Label htmlFor="debt-amount">Amount (PKR)</Label>
                           <Input
                             id="debt-amount"
+                            name="amount"
                             type="number"
+                            min="1"
+                            step="0.01"
                             value={newDebt.amount}
                             onChange={(e) => setNewDebt({ ...newDebt, amount: e.target.value })}
                             placeholder="50000"
+                            required
                           />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="debt-type">Debt Type</Label>
                           <select
                             id="debt-type"
+                            name="type"
                             value={newDebt.type}
                             onChange={(e) =>
                               setNewDebt({ ...newDebt, type: e.target.value as "owed_to_client" | "owed_by_client" })
                             }
                             className="w-full p-2 border rounded-md"
+                            required
                           >
                             <option value="owed_to_client">Dealer owes to me</option>
                             <option value="owed_by_client">I owe to dealer</option>
@@ -730,10 +781,12 @@ export default function DealersPage() {
                           <Label htmlFor="debt-description">Description</Label>
                           <Textarea
                             id="debt-description"
+                            name="description"
                             value={newDebt.description}
                             onChange={(e) => setNewDebt({ ...newDebt, description: e.target.value })}
                             placeholder="Describe the commission or payment..."
                             rows={3}
+                            required
                           />
                         </div>
                         <div className="space-y-2">
@@ -743,13 +796,15 @@ export default function DealersPage() {
                             <div className="text-sm text-gray-600">{debtDocuments.length} document(s) selected</div>
                           )}
                         </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsAddDebtOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleAddDebt}>Add Debt Record</Button>
-                      </DialogFooter>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setIsAddDebtOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button type="submit" disabled={isAddingDebt}>
+                            {isAddingDebt ? "Adding..." : "Add Debt Record"}
+                          </Button>
+                        </DialogFooter>
+                      </form>
                     </DialogContent>
                   </Dialog>
                 </div>
@@ -776,7 +831,7 @@ export default function DealersPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredDealerDebts.map((debt) => {
-                      const dealer = dealers.find((d) => d.id === debt.dealerId)
+                      const dealer = debt.dealer || dealers.find((d) => d.id === debt.dealer_id)
                       return (
                         <TableRow key={debt.id}>
                           <TableCell className="font-medium">{dealer?.name || "Unknown"}</TableCell>
@@ -786,7 +841,7 @@ export default function DealersPage() {
                               <Badge variant={debt.type === "owed_to_client" ? "destructive" : "secondary"}>
                                 {debt.type === "owed_to_client" ? "Owes to me" : "I owe"}
                               </Badge>
-                              {debt.isSettled && (
+                              {debt.is_settled && (
                                 <Badge variant="outline" className="text-green-600">
                                   Settled
                                 </Badge>
@@ -796,25 +851,28 @@ export default function DealersPage() {
                           <TableCell>{debt.description}</TableCell>
                           <TableCell>
                             <div className="text-sm">
-                              <div>Created: {debt.createdAt}</div>
-                              {debt.isSettled && debt.settledDate && (
-                                <div className="text-green-600">Settled: {debt.settledDate}</div>
+                              <div>Created: {new Date(debt.created_at).toLocaleDateString()}</div>
+                              {debt.is_settled && debt.settled_date && (
+                                <div className="text-green-600">Settled: {new Date(debt.settled_date).toLocaleDateString()}</div>
                               )}
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
-                              {debt.documents.length > 0 ? (
-                                <div className="flex gap-1">
+                              {debt.documents && debt.documents.length > 0 ? (
+                                <div className="flex flex-col gap-1">
                                   {debt.documents.map((docPath, index) => {
-                                    const docUrl = getFileUrl("debt-documents", docPath)
-                                    const docName = docPath.split("/").pop() || `Document ${index + 1}`
+                                    // Handle both string and object document formats
+                                    const docName = typeof docPath === 'string' ? docPath : `Document ${index + 1}`
                                     return (
                                       <div key={index} className="flex gap-1">
                                         <Button
                                           variant="outline"
                                           size="sm"
-                                          onClick={() => viewFile(docUrl, docName)}
+                                          onClick={() => {
+                                            const docUrl = getFileUrl("debt-documents", docName)
+                                            viewFile(docUrl, docName)
+                                          }}
                                           title="View File"
                                         >
                                           <Eye className="w-4 h-4 mr-1" />
@@ -823,7 +881,10 @@ export default function DealersPage() {
                                         <Button
                                           variant="outline"
                                           size="sm"
-                                          onClick={() => downloadFile(docUrl, docName)}
+                                          onClick={() => {
+                                            const docUrl = getFileUrl("debt-documents", docName)
+                                            downloadFile(docUrl, docName)
+                                          }}
                                           title="Download File"
                                         >
                                           <Download className="w-4 h-4 mr-1" />
@@ -833,15 +894,15 @@ export default function DealersPage() {
                                     )
                                   })}
                                   {debt.documents.length > 1 && (
-                                    <span className="text-sm text-gray-500 self-center ml-2">
+                                    <div className="text-sm text-gray-500 mt-1">
                                       {debt.documents.length} files
-                                    </span>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
                                 <span className="text-gray-400">No documents</span>
                               )}
-                              {!debt.isSettled && (
+                              {!debt.is_settled && (
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -879,7 +940,7 @@ export default function DealersPage() {
             <DialogDescription>
               {selectedDebtForSettlement && (
                 <>
-                  Mark debt as settled for {dealers.find((d) => d.id === selectedDebtForSettlement.dealerId)?.name}
+                  Mark debt as settled for {selectedDebtForSettlement.dealer?.name || dealers.find((d) => d.id === selectedDebtForSettlement.dealer_id)?.name}
                   <br />
                   Original Amount: {formatCurrency(selectedDebtForSettlement.amount)}
                 </>

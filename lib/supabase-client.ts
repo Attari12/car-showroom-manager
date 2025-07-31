@@ -33,6 +33,7 @@ export interface Car {
   asking_price: number
   purchase_date: string
   owner_name: string
+  purchase_commission?: number
   dealer_commission?: number
   repair_costs?: number
   additional_expenses?: number
@@ -136,6 +137,36 @@ export interface CarInvestment {
   ownership_percentage: number
   profit_earned: number
   is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SellerDebt {
+  id: string
+  client_id: string
+  seller_id: string
+  amount: number
+  type: "owed_to_client" | "owed_by_client"
+  description: string
+  documents?: string[]
+  is_settled: boolean
+  settled_date?: string
+  settled_amount?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface InvestorDebt {
+  id: string
+  client_id: string
+  investor_id: string
+  amount: number
+  type: "owed_to_client" | "owed_by_client"
+  description: string
+  documents?: string[]
+  is_settled: boolean
+  settled_date?: string
+  settled_amount?: number
   created_at: string
   updated_at: string
 }
@@ -408,6 +439,33 @@ export async function createCar(car: Omit<Car, "id" | "created_at" | "updated_at
     }
 
     console.log("Car created successfully:", data)
+
+    // Update seller statistics if seller_id is provided
+    const createdCar = Array.isArray(data) ? data[0] : data
+    if (createdCar && car.seller_id && car.purchase_price) {
+      try {
+        // Get current seller data
+        const seller = await getSellerById(car.seller_id)
+
+        // Calculate new statistics
+        const newTotalCarsSold = seller.total_cars_sold + 1
+        const newTotalAmountPaid = seller.total_amount_paid + car.purchase_price
+        const currentDate = new Date().toISOString().split('T')[0]
+
+        // Update seller statistics
+        await updateSeller(car.seller_id, {
+          total_cars_sold: newTotalCarsSold,
+          total_amount_paid: newTotalAmountPaid,
+          last_sale_date: currentDate
+        })
+
+        console.log(`Updated seller statistics for seller ${car.seller_id}: ${newTotalCarsSold} cars, ₨${newTotalAmountPaid} total`)
+      } catch (sellerError) {
+        console.error("Error updating seller statistics:", sellerError)
+        // Don't throw error - car creation was successful, seller stats update failed
+      }
+    }
+
     return { data, error: null }
   } catch (error) {
     console.error("Error in createCar:", error)
@@ -417,12 +475,13 @@ export async function createCar(car: Omit<Car, "id" | "created_at" | "updated_at
 
 export async function updateCar(id: string, updates: Partial<Car>) {
   try {
+    // Get current car data before updating
+    const currentCar = await getCarById(id)
+
     // Handle auction_sheet updates by embedding in description
     let finalUpdates = { ...updates }
 
     if (updates.auction_sheet !== undefined) {
-      // Get current car data to preserve existing description
-      const currentCar = await getCarById(id)
       let enhancedDescription = updates.description !== undefined ? updates.description : (currentCar.description || "")
 
       // Remove any existing auction sheet data
@@ -463,6 +522,8 @@ export async function updateCar(id: string, updates: Partial<Car>) {
       })
       throw new Error(`Database error: ${error.message}`)
     }
+
+
 
     // Extract auction_sheet data from description field before returning
     let auctionSheet = null
@@ -851,6 +912,30 @@ export async function createCarInvestment(investment: Omit<CarInvestment, "id" |
       console.error("Supabase error:", error)
       throw error
     }
+
+    // Update investor statistics
+    if (data && investment.investor_id && investment.investment_amount > 0) {
+      try {
+        // Get current investor data
+        const investor = await getInvestorById(investment.investor_id)
+
+        // Calculate new statistics
+        const newTotalInvestment = investor.total_investment + investment.investment_amount
+        const newActiveInvestments = investor.active_investments + 1
+
+        // Update investor statistics
+        await updateInvestor(investment.investor_id, {
+          total_investment: newTotalInvestment,
+          active_investments: newActiveInvestments
+        })
+
+        console.log(`Updated investor statistics for investor ${investment.investor_id}: ₨${newTotalInvestment} total, ${newActiveInvestments} active`)
+      } catch (investorError) {
+        console.error("Error updating investor statistics:", investorError)
+        // Don't throw error - investment creation was successful, stats update failed
+      }
+    }
+
     return data
   } catch (error) {
     console.error("Error in createCarInvestment:", error)
@@ -891,6 +976,266 @@ export async function deleteFile(bucket: string, path: string) {
   }
 }
 
+// Dealer Debt operations
+export async function getDealerDebts(clientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("dealer_debts")
+      .select(`
+        *,
+        dealer:dealers(name, cnic, phone)
+      `)
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      // If table doesn't exist, return empty array
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.warn('dealer_debts table does not exist yet. Returning empty array.')
+        return []
+      }
+      throw new Error(`Failed to get dealer debts: ${error.message || 'Unknown error'}`)
+    }
+    return data || []
+  } catch (error) {
+    console.error("Error in getDealerDebts:", error)
+    if (error instanceof Error) {
+      // If table doesn't exist, return empty array
+      if (error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.warn('dealer_debts table does not exist yet. Returning empty array.')
+        return []
+      }
+      throw error
+    }
+    throw new Error(`Failed to get dealer debts: ${error}`)
+  }
+}
+
+// Seller Debt operations
+export async function getSellerDebts(clientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("seller_debts")
+      .select(`
+        *,
+        seller:sellers(name, cnic, phone)
+      `)
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      // If table doesn't exist, return empty array
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.warn('seller_debts table does not exist yet. Returning empty array.')
+        return []
+      }
+      throw new Error(`Failed to get seller debts: ${error.message || 'Unknown error'}`)
+    }
+    return data || []
+  } catch (error) {
+    console.error("Error in getSellerDebts:", error)
+    if (error instanceof Error) {
+      // If table doesn't exist, return empty array
+      if (error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.warn('seller_debts table does not exist yet. Returning empty array.')
+        return []
+      }
+      throw error
+    }
+    throw new Error(`Failed to get seller debts: ${error}`)
+  }
+}
+
+export async function createSellerDebt(debt: Omit<SellerDebt, "id" | "created_at" | "updated_at">) {
+  try {
+    const { data, error } = await supabase
+      .from("seller_debts")
+      .insert([
+        {
+          ...debt,
+          documents: debt.documents || [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      // If table doesn't exist, provide helpful error
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        throw new Error('Seller debts table does not exist. Please contact administrator to set up debt management tables.')
+      }
+      throw new Error(`Failed to create seller debt: ${error.message || 'Unknown error'}`)
+    }
+    return data
+  } catch (error) {
+    console.error("Error in createSellerDebt:", error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to create seller debt: ${error}`)
+  }
+}
+
+export async function settleSellerDebt(id: string, updates: Partial<SellerDebt>) {
+  try {
+    const { data, error } = await supabase
+      .from("seller_debts")
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      throw new Error(`Failed to settle seller debt: ${error.message || 'Unknown error'}`)
+    }
+    return data
+  } catch (error) {
+    console.error("Error in settleSellerDebt:", error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to settle seller debt: ${error}`)
+  }
+}
+
+export async function deleteSellerDebt(id: string) {
+  try {
+    const { error } = await supabase.from("seller_debts").delete().eq("id", id)
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      throw new Error(`Failed to delete seller debt: ${error.message || 'Unknown error'}`)
+    }
+  } catch (error) {
+    console.error("Error in deleteSellerDebt:", error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to delete seller debt: ${error}`)
+  }
+}
+
+// Investor Debt operations
+export async function getInvestorDebts(clientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("investor_debts")
+      .select(`
+        *,
+        investor:investors(name, cnic, phone)
+      `)
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      // If table doesn't exist, return empty array
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.warn('investor_debts table does not exist yet. Returning empty array.')
+        return []
+      }
+      throw new Error(`Failed to get investor debts: ${error.message || 'Unknown error'}`)
+    }
+    return data || []
+  } catch (error) {
+    console.error("Error in getInvestorDebts:", error)
+    if (error instanceof Error) {
+      // If table doesn't exist, return empty array
+      if (error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.warn('investor_debts table does not exist yet. Returning empty array.')
+        return []
+      }
+      throw error
+    }
+    throw new Error(`Failed to get investor debts: ${error}`)
+  }
+}
+
+export async function createInvestorDebt(debt: Omit<InvestorDebt, "id" | "created_at" | "updated_at">) {
+  try {
+    const { data, error } = await supabase
+      .from("investor_debts")
+      .insert([
+        {
+          ...debt,
+          documents: debt.documents || [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      // If table doesn't exist, provide helpful error
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        throw new Error('Investor debts table does not exist. Please contact administrator to set up debt management tables.')
+      }
+      throw new Error(`Failed to create investor debt: ${error.message || 'Unknown error'}`)
+    }
+    return data
+  } catch (error) {
+    console.error("Error in createInvestorDebt:", error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to create investor debt: ${error}`)
+  }
+}
+
+export async function settleInvestorDebt(id: string, updates: Partial<InvestorDebt>) {
+  try {
+    const { data, error } = await supabase
+      .from("investor_debts")
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      throw new Error(`Failed to settle investor debt: ${error.message || 'Unknown error'}`)
+    }
+    return data
+  } catch (error) {
+    console.error("Error in settleInvestorDebt:", error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to settle investor debt: ${error}`)
+  }
+}
+
+export async function deleteInvestorDebt(id: string) {
+  try {
+    const { error } = await supabase.from("investor_debts").delete().eq("id", id)
+
+    if (error) {
+      console.error("Supabase error:", error.message || error)
+      throw new Error(`Failed to delete investor debt: ${error.message || 'Unknown error'}`)
+    }
+  } catch (error) {
+    console.error("Error in deleteInvestorDebt:", error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to delete investor debt: ${error}`)
+  }
+}
+
 // Update the getFileUrl function to handle different bucket types
 export function getFileUrl(bucket: string, path: string) {
   if (!path) return "/placeholder.svg"
@@ -902,6 +1247,39 @@ export function getFileUrl(bucket: string, path: string) {
 
   const { data } = supabase.storage.from(bucket).getPublicUrl(path)
   return data.publicUrl
+}
+
+// Check if debt tables exist
+export async function checkDebtTablesExist() {
+  const results = {
+    seller_debts: false,
+    investor_debts: false,
+    buyer_debts: false,
+    dealer_debts: false,
+  }
+
+  try {
+    // Test seller_debts
+    const { error: sellerError } = await supabase.from('seller_debts').select('id').limit(1)
+    results.seller_debts = !sellerError
+
+    // Test investor_debts
+    const { error: investorError } = await supabase.from('investor_debts').select('id').limit(1)
+    results.investor_debts = !investorError
+
+    // Test buyer_debts
+    const { error: buyerError } = await supabase.from('buyer_debts').select('id').limit(1)
+    results.buyer_debts = !buyerError
+
+    // Test dealer_debts
+    const { error: dealerError } = await supabase.from('dealer_debts').select('id').limit(1)
+    results.dealer_debts = !dealerError
+
+  } catch (error) {
+    console.error('Error checking debt table existence:', error)
+  }
+
+  return results
 }
 
 // Database operations object for backwards compatibility

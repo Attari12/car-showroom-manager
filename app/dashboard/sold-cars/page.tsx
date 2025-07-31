@@ -7,10 +7,12 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Car, DollarSign, TrendingUp, Search, Eye, AlertCircle, Calendar } from "lucide-react"
-import { getCars, type Car as CarType } from "@/lib/supabase-client"
+import { getCars, getCarInvestments, type Car as CarType } from "@/lib/supabase-client"
+import { calculateProfitDistribution, calculateBaseProfit, type CarSaleData, type CarInvestment as CarInvestmentType } from "@/lib/profit-calculations"
 
 export default function SoldCarsPage() {
   const [cars, setCars] = useState<CarType[]>([])
+  const [carInvestments, setCarInvestments] = useState<Record<string, any[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
@@ -38,6 +40,19 @@ export default function SoldCarsPage() {
       // Filter only sold cars
       const soldCars = carsData.filter((car) => car.status === "sold")
       setCars(soldCars)
+
+      // Load investment data for each sold car
+      const investmentData: Record<string, any[]> = {}
+      for (const car of soldCars) {
+        try {
+          const investments = await getCarInvestments(car.id)
+          investmentData[car.id] = investments
+        } catch (error) {
+          console.error(`Error loading investments for car ${car.id}:`, error)
+          investmentData[car.id] = []
+        }
+      }
+      setCarInvestments(investmentData)
     } catch (error: any) {
       console.error("Error loading sold cars:", error)
       setError(`Failed to load sold cars: ${error.message}`)
@@ -54,24 +69,6 @@ export default function SoldCarsPage() {
     }).format(amount)
   }
 
-  const calculateProfit = (car: CarType) => {
-    // Extract money spent from description
-    let moneySpent = 0
-    if (car.description) {
-      const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
-      if (moneySpentMatch) {
-        moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
-      }
-    }
-
-    return car.asking_price - car.purchase_price - (car.dealer_commission || 0) - (car.repair_costs || 0) - (car.additional_expenses || 0) - moneySpent
-  }
-
-  const calculateProfitMargin = (car: CarType) => {
-    const profit = calculateProfit(car)
-    return ((profit / car.asking_price) * 100).toFixed(1)
-  }
-
   const getMoneySpent = (car: CarType) => {
     if (car.description) {
       const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
@@ -80,6 +77,62 @@ export default function SoldCarsPage() {
       }
     }
     return 0
+  }
+
+  const calculateProfit = (car: CarType) => {
+    // Simple profit calculation (keeping for backward compatibility)
+    const moneySpent = getMoneySpent(car)
+    return car.asking_price - car.purchase_price - (car.purchase_commission || 0) - (car.dealer_commission || 0) - (car.repair_costs || 0) - (car.additional_expenses || 0) - moneySpent
+  }
+
+  const calculateProfitMargin = (car: CarType) => {
+    const profit = calculateProfit(car)
+    return ((profit / car.asking_price) * 100).toFixed(1)
+  }
+
+  const calculateDetailedProfitDistribution = (car: CarType) => {
+    const investments = carInvestments[car.id] || []
+    const moneySpent = getMoneySpent(car)
+
+    // Create CarSaleData for profit distribution calculation
+    const saleData: CarSaleData = {
+      purchase_price: car.purchase_price,
+      sold_price: car.asking_price,
+      additional_expenses: (car.repair_costs || 0) + (car.additional_expenses || 0) + moneySpent,
+      purchase_commission: car.purchase_commission || 0,
+      dealer_commission: car.dealer_commission || 0,
+      investment: {
+        showroom_investment: car.showroom_investment || 0,
+        investors: investments.map(inv => ({
+          id: inv.investor_id,
+          name: inv.investor?.name || 'Unknown',
+          cnic: inv.investor?.cnic || '',
+          investment_amount: inv.investment_amount || 0
+        })),
+        ownership_type: car.ownership_type || 'partially_owned',
+        commission_type: car.commission_type || 'flat',
+        commission_amount: car.commission_amount || 0,
+        commission_percentage: car.commission_percentage || 0
+      }
+    }
+
+    try {
+      return calculateProfitDistribution(saleData)
+    } catch (error) {
+      console.error(`Error calculating profit distribution for car ${car.id}:`, error)
+      // Fallback to simple calculation
+      const totalProfit = calculateProfit(car)
+      return {
+        total_profit: totalProfit,
+        total_investment: car.purchase_price,
+        showroom_share: {
+          amount: totalProfit,
+          percentage: 100,
+          source: 'ownership' as const
+        },
+        investor_shares: []
+      }
+    }
   }
 
   const filteredCars = cars.filter((car) => {
@@ -263,6 +316,7 @@ export default function SoldCarsPage() {
             {filteredCars.map((car) => {
               const profit = calculateProfit(car)
               const profitMargin = calculateProfitMargin(car)
+              const distribution = calculateDetailedProfitDistribution(car)
 
               return (
                 <Card key={car.id} className="overflow-hidden hover:shadow-lg transition-shadow">
@@ -309,13 +363,38 @@ export default function SoldCarsPage() {
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-600">Profit:</span>
-                        <span className={`font-medium ${profit > 0 ? "text-green-600" : "text-red-600"}`}>
-                          {formatCurrency(profit)} ({profitMargin}%)
+                        <span className={`font-medium ${distribution.total_profit > 0 ? "text-green-600" : "text-red-600"}`}>
+                          {formatCurrency(distribution.total_profit)} ({profitMargin}%)
                         </span>
                       </div>
+
+                      {/* Show profit distribution if there are investors */}
+                      {distribution.investor_shares.length > 0 && (
+                        <>
+                          <div className="border-t pt-2 mt-2">
+                            <div className="text-xs text-gray-500 mb-1">Profit Distribution:</div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-gray-600">Showroom ({distribution.showroom_share.percentage.toFixed(1)}%):</span>
+                              <span className="text-blue-600">+{formatCurrency(distribution.showroom_share.amount)}</span>
+                            </div>
+                            {distribution.investor_shares.map((investor, idx) => (
+                              <div key={idx} className="flex justify-between text-xs">
+                                <span className="text-gray-600">{investor.investor_name} ({investor.ownership_percentage.toFixed(1)}%):</span>
+                                <span className="text-green-600">+{formatCurrency(investor.profit_share)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {car.purchase_commission && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Purchase Commission:</span>
+                          <span className="text-red-600">-{formatCurrency(car.purchase_commission)}</span>
+                        </div>
+                      )}
                       {car.dealer_commission && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Commission:</span>
+                          <span className="text-gray-600">Sale Commission:</span>
                           <span className="text-red-600">-{formatCurrency(car.dealer_commission)}</span>
                         </div>
                       )}

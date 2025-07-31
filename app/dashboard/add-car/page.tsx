@@ -92,6 +92,7 @@ export default function AddCarPage() {
     asking_price: 0,
     purchase_date: new Date().toISOString().split("T")[0],
     owner_name: "",
+    purchase_commission: 0,
     dealer_commission: 0,
     status: "available" as "available" | "sold" | "reserved" | "pending",
     description: "",
@@ -308,9 +309,28 @@ export default function AddCarPage() {
   const selectExistingInvestor = (index: number, investorId: string) => {
     const existingInvestor = availableInvestors.find(inv => inv.id === investorId)
     if (existingInvestor) {
-      handleInvestorChange(index, 'id', investorId)
-      handleInvestorChange(index, 'name', existingInvestor.name)
-      handleInvestorChange(index, 'cnic', existingInvestor.cnic)
+      const updatedInvestors = investors.map((inv, i) =>
+        i === index ? {
+          ...inv,
+          id: investorId,
+          name: existingInvestor.name,
+          cnic: existingInvestor.cnic,
+          phone: existingInvestor.phone || inv.phone
+        } : inv
+      )
+      setInvestors(updatedInvestors)
+    } else {
+      // Clear fields if no investor selected
+      const updatedInvestors = investors.map((inv, i) =>
+        i === index ? {
+          ...inv,
+          id: undefined,
+          name: "",
+          cnic: "",
+          phone: undefined
+        } : inv
+      )
+      setInvestors(updatedInvestors)
     }
   }
 
@@ -466,6 +486,7 @@ Grade Scale:
         asking_price: formData.asking_price,
         purchase_date: formData.purchase_date,
         owner_name: formData.owner_name,
+        purchase_commission: formData.purchase_commission || undefined,
         dealer_commission: formData.dealer_commission || undefined,
         status: formData.status,
         description: formData.description || undefined,
@@ -556,6 +577,7 @@ Grade Scale:
         asking_price: 0,
         purchase_date: new Date().toISOString().split("T")[0],
         owner_name: "",
+        purchase_commission: 0,
         dealer_commission: 0,
         status: "available",
         description: "",
@@ -859,7 +881,20 @@ Grade Scale:
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="dealer_commission">Dealer Commission </Label>
+                  <Label htmlFor="purchase_commission">Purchase Commission</Label>
+                  <Input
+                    id="purchase_commission"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.purchase_commission}
+                    onChange={(e) => handleInputChange("purchase_commission", Number.parseFloat(e.target.value) || 0)}
+                    placeholder="0.0"
+                  />
+                  <p className="text-xs text-gray-500">Commission paid to dealer at time of purchase</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dealer_commission">Sale Commission</Label>
                   <Input
                     id="dealer_commission"
                     type="number"
@@ -869,6 +904,7 @@ Grade Scale:
                     onChange={(e) => handleInputChange("dealer_commission", Number.parseFloat(e.target.value) || 0)}
                     placeholder="0.0"
                   />
+                  <p className="text-xs text-gray-500">Commission paid to dealer at time of sale</p>
                 </div>
               </div>
             </CardContent>
