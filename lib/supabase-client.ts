@@ -1,10 +1,16 @@
 import { createClient } from "@supabase/supabase-js"
+import { calculateProfitDistribution } from "./profit-calculations"
 
 // Environment variables - replace with your actual values
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://saicjjshmgwsitmwvomj.supabase.co"
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhaWNqanNobWd3c2l0bXd2b21qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM3MzM4OTQsImV4cCI6MjA2OTMwOTg5NH0.DjDOkzdTmRPM7aC-E8xvYT61jPzk2eSmSedzy1qr-4c"
+
+// Validate Supabase configuration
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase configuration')
+}
 
 // Create Supabase client
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -318,6 +324,10 @@ export async function authenticateClient(username: string, password: string) {
 // Car operations
 export async function getCars(clientId: string) {
   try {
+    if (!clientId) {
+      throw new Error('Client ID is required')
+    }
+
     const { data, error } = await supabase
       .from("cars")
       .select("*")
@@ -325,8 +335,13 @@ export async function getCars(clientId: string) {
       .order("created_at", { ascending: false })
 
     if (error) {
-      console.error("Supabase error:", error)
-      throw error
+      console.error("Supabase error details:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
+      throw new Error(`Failed to get cars: ${error.message || error.details || 'Database connection error'}`)
     }
 
     // Extract auction_sheet data from description field
@@ -354,9 +369,9 @@ export async function getCars(clientId: string) {
     })
 
     return carsWithParsedAuctionSheet
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error in getCars:", error)
-    throw error
+    throw new Error(`Failed to load cars: ${error.message || 'Database connection error'}`)
   }
 }
 
@@ -772,17 +787,31 @@ export async function recalculateInvestorProfits(clientId: string) {
     // Get all investors for this client
     const investors = await getInvestors(clientId)
 
-    // For each investor, calculate their profits from actual investments
+    // Get all sold cars with their profit distributions (same as sold cars page)
+    const allCars = await getCars(clientId)
+    const soldCars = allCars.filter(car => car.status === 'sold')
+
+    console.log(`\n=== FETCHING PROFIT DATA FROM SOLD CARS ===`)
+    console.log(`Found ${soldCars.length} sold cars to process`)
+
+    // For each investor, fetch their profit data directly from sold cars
     for (const investor of investors) {
       let totalInvestment = 0
       let totalProfit = 0
       let activeInvestments = 0
 
+      console.log(`\n=== PROCESSING INVESTOR: ${investor.name} ===`)
+
       // Get all investments for this investor
       const investments = await getInvestmentsByInvestorId(investor.id)
+      console.log(`Found ${investments.length} investments for ${investor.name}`)
 
       for (const investment of investments) {
         if (!investment.car) continue
+
+        console.log(`\nProcessing car: ${investment.car.make} ${investment.car.model} ${investment.car.year}`)
+        console.log(`  Status: ${investment.car.status}`)
+        console.log(`  Investment: Rs ${investment.investment_amount}`)
 
         // Add to total investment
         totalInvestment += investment.investment_amount
@@ -790,32 +819,71 @@ export async function recalculateInvestorProfits(clientId: string) {
         // Check if car is active
         if (investment.car.status !== 'sold') {
           activeInvestments++
+          console.log(`  -> Active car, no profit calculated`)
         } else {
-          // Car is sold, try to get sold car data for profit calculation
-          try {
-            const { data: soldCarData, error: soldError } = await supabase
-              .from("sold_cars")
-              .select("*")
-              .eq("car_id", investment.car.id)
-              .single()
+          // Car is sold - get profit data from sold cars calculation (same as sold cars page)
+          const soldCar = soldCars.find(car => car.id === investment.car.id)
+          if (soldCar) {
+            try {
+              // Get car investments for profit distribution calculation
+              const carInvestments = await getCarInvestments(soldCar.id)
 
-            if (!soldError && soldCarData) {
-              // Calculate this investor's share of the profit
-              const grossProfit = soldCarData.sale_price - investment.car.purchase_price
-              const totalCommissions = (soldCarData.purchase_commission || 0) +
-                                     (soldCarData.sale_commission || 0)
-              const netProfit = Math.max(0, grossProfit - totalCommissions)
+              // Get money spent from description (same as sold cars page)
+              let moneySpent = 0
+              if (soldCar.description) {
+                const moneySpentMatch = soldCar.description.match(/Money spent on car: ₨([\d,]+)/i)
+                if (moneySpentMatch) {
+                  moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+                }
+              }
 
-              // Calculate investor's profit share based on ownership percentage
-              const investorProfitShare = netProfit * (investment.ownership_percentage / 100)
-              totalProfit += investorProfitShare
+              // Use the same profit distribution logic as sold cars page
+
+              const saleData = {
+                purchase_price: soldCar.purchase_price,
+                sold_price: soldCar.asking_price,
+                additional_expenses: (soldCar.repair_costs || 0) + (soldCar.additional_expenses || 0) + moneySpent,
+                purchase_commission: soldCar.purchase_commission || 0,
+                dealer_commission: soldCar.dealer_commission || 0,
+                investment: {
+                  showroom_investment: soldCar.showroom_investment || 0,
+                  investors: carInvestments.map(inv => ({
+                    id: inv.investor_id,
+                    name: inv.investor?.name || 'Unknown',
+                    cnic: inv.investor?.cnic || '',
+                    investment_amount: inv.investment_amount || 0
+                  })),
+                  ownership_type: soldCar.ownership_type || 'partially_owned' as const,
+                  commission_type: soldCar.commission_type || 'flat' as const,
+                  commission_amount: soldCar.commission_amount || 0,
+                  commission_percentage: soldCar.commission_percentage || 0
+                }
+              }
+
+              const distribution = calculateProfitDistribution(saleData)
+
+              // Find this investor's share in the distribution
+              const investorShare = distribution.investor_shares.find(
+                share => share.investor_id === investor.id || share.investor_name === investor.name
+              )
+
+              if (investorShare) {
+                totalProfit += investorShare.profit_share
+                console.log(`  -> Found profit share: Rs ${investorShare.profit_share} (${investorShare.ownership_percentage.toFixed(1)}%)`)
+              } else {
+                console.log(`  -> No profit share found for ${investor.name}`)
+              }
+            } catch (error) {
+              console.warn(`Could not get profit for car ${soldCar.id}:`, error)
             }
-          } catch (soldCarError) {
-            // If sold_cars table doesn't exist or has issues, continue without profit calculation
-            console.info("Could not calculate profit for sold car", investment.car.id)
           }
         }
       }
+
+      console.log(`\n=== FINAL TOTALS FOR ${investor.name} ===`)
+      console.log(`Total Investment: Rs ${totalInvestment}`)
+      console.log(`Total Profit: Rs ${totalProfit}`)
+      console.log(`Active Investments: ${activeInvestments}`)
 
       // Update investor with calculated values
       await updateInvestor(investor.id, {
@@ -824,10 +892,10 @@ export async function recalculateInvestorProfits(clientId: string) {
         active_investments: activeInvestments,
       })
 
-      console.log(`Updated investor ${investor.name}: ₨${totalInvestment} invested, ₨${totalProfit} profit, ${activeInvestments} active`)
+      console.log(`✓ Updated investor ${investor.name} in database`)
     }
 
-    return { success: true, message: "Investor profits recalculated successfully" }
+    return { success: true, message: "Investor profits updated from sold cars data" }
   } catch (error: any) {
     console.error("Error recalculating investor profits:", error)
     throw error

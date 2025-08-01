@@ -153,7 +153,13 @@ export default function SoldCarsPage() {
   })
 
   const totalRevenue = filteredCars.reduce((sum, car) => sum + car.asking_price, 0)
-  const totalProfit = filteredCars.reduce((sum, car) => sum + calculateProfit(car), 0)
+
+  // Calculate total profit as sum of showroom profit shares only
+  const totalProfit = filteredCars.reduce((sum, car) => {
+    const distribution = calculateDetailedProfitDistribution(car)
+    return sum + distribution.showroom_share.amount
+  }, 0)
+
   const totalExpenses = filteredCars.reduce((sum, car) => sum + (car.dealer_commission || 0) + (car.repair_costs || 0) + (car.additional_expenses || 0) + getMoneySpent(car), 0)
   const averageProfit = filteredCars.length > 0 ? totalProfit / filteredCars.length : 0
 
