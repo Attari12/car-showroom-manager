@@ -26,22 +26,13 @@ import {
   FileText,
   Download,
   Trash2,
+  Eye,
 } from "lucide-react"
-import { getInvestorDebts, createInvestorDebt, settleInvestorDebt, deleteInvestorDebt, type InvestorDebt } from "@/lib/supabase-client"
+import { getInvestorDebts, createInvestorDebt, settleInvestorDebt, deleteInvestorDebt, getInvestorById, getInvestmentsByInvestorId, recalculateInvestorProfits, type InvestorDebt, type Investor } from "@/lib/supabase-client"
 
-interface InvestorDetail {
-  id: string
-  name: string
-  cnic: string
-  phone: string
-  email?: string
-  address?: string
-  total_investment: number
-  total_profit: number
-  active_investments: number
+interface InvestorDetail extends Investor {
   completed_investments: number
   roi_percentage: number
-  created_at: string
 }
 
 interface Investment {
@@ -111,62 +102,48 @@ export default function InvestorDetailPage() {
     try {
       setLoading(true)
       setError("")
-      
-      // Mock data - replace with actual API calls
-      const mockInvestor: InvestorDetail = {
-        id: investorId,
-        name: "Ahmed Ali",
-        cnic: "42101-1234567-1",
-        phone: "+92-300-1234567",
-        email: "ahmed@example.com",
-        address: "Lahore, Pakistan",
-        total_investment: 500000,
-        total_profit: 75000,
-        active_investments: 2,
-        completed_investments: 3,
-        roi_percentage: 15.0,
-        created_at: new Date().toISOString(),
+
+      // Load actual investor data
+      const investorData = await getInvestorById(investorId)
+
+      if (!investorData) {
+        setError("Investor not found")
+        return
       }
 
-      const mockInvestments: Investment[] = [
-        {
-          id: "inv-1",
-          car_make: "Toyota",
-          car_model: "Corolla",
-          car_year: 2020,
-          investment_amount: 150000,
-          ownership_percentage: 60,
-          status: "sold",
-          profit_earned: 25000,
-          sale_date: "2024-01-15",
-          created_at: "2023-12-01",
-        },
-        {
-          id: "inv-2",
-          car_make: "Honda",
-          car_model: "Civic",
-          car_year: 2021,
-          investment_amount: 200000,
-          ownership_percentage: 80,
-          status: "active",
-          created_at: "2024-01-10",
-        },
-        {
-          id: "inv-3",
-          car_make: "Suzuki",
-          car_model: "Alto",
-          car_year: 2019,
-          investment_amount: 150000,
-          ownership_percentage: 100,
-          status: "sold",
-          profit_earned: 50000,
-          sale_date: "2024-01-20",
-          created_at: "2023-11-15",
-        },
-      ]
+      // Load actual investments for this investor
+      const investorInvestments = await getInvestmentsByInvestorId(investorId)
 
-      setInvestor(mockInvestor)
-      setInvestments(mockInvestments)
+      // Calculate completed investments count
+      const completedInvestments = investorInvestments.filter(inv =>
+        inv.car && inv.car.status === 'sold'
+      ).length
+
+      // Calculate additional fields
+      const investorDetail: InvestorDetail = {
+        ...investorData,
+        completed_investments: completedInvestments,
+        roi_percentage: investorData.total_investment > 0
+          ? (investorData.total_profit / investorData.total_investment) * 100
+          : 0,
+      }
+
+      // Convert car investments to Investment format
+      const actualInvestments: Investment[] = investorInvestments.map(inv => ({
+        id: inv.car?.id || inv.id, // Use car ID for navigation
+        car_make: inv.car?.make || "Unknown",
+        car_model: inv.car?.model || "Unknown",
+        car_year: inv.car?.year || 0,
+        investment_amount: inv.investment_amount,
+        ownership_percentage: inv.ownership_percentage,
+        status: inv.car?.status as 'active' | 'sold' | 'reserved' || 'active',
+        profit_earned: undefined, // TODO: Calculate from sold cars data
+        sale_date: inv.car?.purchase_date || inv.created_at,
+        created_at: inv.created_at,
+      }))
+
+      setInvestor(investorDetail)
+      setInvestments(actualInvestments)
     } catch (error: any) {
       console.error("Error loading investor details:", error)
       setError(`Failed to load investor details: ${error.message}`)
@@ -455,6 +432,18 @@ export default function InvestorDetailPage() {
                             </div>
                           </div>
                         )}
+                      </div>
+
+                      <div className="flex gap-2 ml-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(`/dashboard/cars/${investment.id}`)}
+                          className="text-blue-600 hover:text-blue-700"
+                        >
+                          <Eye className="w-4 h-4 mr-1" />
+                          View Details
+                        </Button>
                       </div>
                     </div>
                   </div>

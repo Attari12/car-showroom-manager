@@ -21,7 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye, Download } from "lucide-react"
-import { getDealers, getCars, createDealer, getFileUrl, getDealerDebts } from "@/lib/supabase-client"
+import { getDealers, getCars, createDealer, getFileUrl, getDealerDebts, uploadFile } from "@/lib/supabase-client"
 
 interface Dealer {
   id: string
@@ -277,6 +277,31 @@ export default function DealersPage() {
     setIsAddingDebt(true)
 
     try {
+      // Upload documents to storage if any
+      let uploadedDocumentPaths: string[] = []
+
+      if (debtDocuments.length > 0) {
+        console.log("Uploading", debtDocuments.length, "documents...")
+
+        for (const file of debtDocuments) {
+          try {
+            // Create unique filename with timestamp
+            const timestamp = Date.now()
+            const fileExtension = file.name.split('.').pop()
+            const uniqueFileName = `debt_${timestamp}_${Math.random().toString(36).substr(2, 9)}.${fileExtension}`
+
+            // Upload file to debt-documents bucket
+            const uploadResult = await uploadFile(file, "debt-documents", uniqueFileName)
+            uploadedDocumentPaths.push(uniqueFileName)
+
+            console.log("Uploaded file:", uniqueFileName)
+          } catch (uploadError) {
+            console.error("Error uploading file:", file.name, uploadError)
+            // Continue with other files, don't fail the entire operation
+          }
+        }
+      }
+
       const debt: DealerDebt = {
         id: Date.now().toString(),
         dealer_id: newDebt.dealerId,
@@ -284,7 +309,7 @@ export default function DealersPage() {
         type: newDebt.type,
         description: newDebt.description.trim(),
         created_at: new Date().toISOString(),
-        documents: debtDocuments.map((file) => file.name),
+        documents: uploadedDocumentPaths, // Use uploaded file paths instead of names
         is_settled: false,
       }
 
@@ -294,8 +319,12 @@ export default function DealersPage() {
       setDebtDocuments([])
       setIsAddDebtOpen(false)
 
-      // Show success message
-      alert("Debt record added successfully!")
+      // Show success message with upload info
+      if (uploadedDocumentPaths.length > 0) {
+        alert(`Debt record added successfully! ${uploadedDocumentPaths.length} document(s) uploaded.`)
+      } else {
+        alert("Debt record added successfully!")
+      }
     } catch (error) {
       console.error("Error adding debt:", error)
       alert("Error adding debt record. Please try again.")
@@ -346,7 +375,7 @@ export default function DealersPage() {
 
         if (!response.ok) {
           if (response.status === 404) {
-            throw new Error(`Document not found (404). The file may not exist in storage or the path is incorrect.`)
+            throw new Error(`Document not found in storage. This could be because:\n• The file failed to upload\n• The file was deleted\n• The file path is incorrect\n\nPlease try re-uploading the document.`)
           }
           throw new Error(`HTTP error! status: ${response.status}`)
         }
@@ -387,7 +416,7 @@ export default function DealersPage() {
     try {
       // Check if URL is valid
       if (!url || url === "/placeholder.svg") {
-        alert("Document file not found. The document may not have been uploaded yet or the file path is incorrect.")
+        alert("Document not available for viewing.\n\nThis could be because:\n• The file failed to upload when the debt was created\n• The file was deleted from storage\n• The file path is incorrect\n\nPlease try re-uploading the document.")
         return
       }
 

@@ -23,7 +23,7 @@ import {
   Users,
   Car,
 } from "lucide-react"
-import { getInvestors, createInvestor, updateInvestor, deleteInvestor, type Investor } from "@/lib/supabase-client"
+import { getInvestors, createInvestor, updateInvestor, deleteInvestor, recalculateInvestorProfits, type Investor } from "@/lib/supabase-client"
 
 
 
@@ -65,6 +65,15 @@ export default function InvestorsPage() {
     try {
       setLoading(true)
       setError("")
+
+      // First recalculate profits to ensure data is up to date
+      try {
+        await recalculateInvestorProfits(clientId)
+      } catch (calcError: any) {
+        console.warn("Failed to recalculate profits:", calcError.message)
+        // Continue loading even if recalculation fails
+      }
+
       const investorsData = await getInvestors(clientId)
       setInvestors(investorsData)
     } catch (error: any) {

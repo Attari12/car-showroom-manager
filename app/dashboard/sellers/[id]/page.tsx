@@ -26,22 +26,16 @@ import {
   FileText,
   Download,
   Trash2,
+  Eye,
 } from "lucide-react"
-import { getSellerDebts, createSellerDebt, settleSellerDebt, deleteSellerDebt, type SellerDebt } from "@/lib/supabase-client"
+import { getSellerDebts, createSellerDebt, settleSellerDebt, deleteSellerDebt, getSellerById, getCarsBySellerId, getSoldCarsByCarIds, type SellerDebt, type Seller } from "@/lib/supabase-client"
 
-interface SellerDetail {
-  id: string
-  name: string
-  cnic: string
-  phone: string
-  email?: string
-  address?: string
+interface SellerDetail extends Seller {
   total_cars_sold: number
   total_amount_paid: number
   average_car_price: number
   first_sale_date: string
   last_sale_date?: string
-  created_at: string
 }
 
 interface SaleTransaction {
@@ -113,65 +107,65 @@ export default function SellerDetailPage() {
       setLoading(true)
       setError("")
 
-      // Mock data - replace with actual API calls
-      const mockSeller: SellerDetail = {
-        id: sellerId,
-        name: "Muhammad Hassan",
-        cnic: "42301-5678901-3",
-        phone: "+92-302-5678901",
-        email: "hassan@example.com",
-        address: "Islamabad, Pakistan",
-        total_cars_sold: 8,
-        total_amount_paid: 2400000,
-        average_car_price: 300000,
-        first_sale_date: "2023-06-15",
-        last_sale_date: "2024-01-15",
-        created_at: "2023-06-01",
+      // Load actual seller data
+      const sellerData = await getSellerById(sellerId)
+
+      if (!sellerData) {
+        setError("Seller not found")
+        return
       }
 
-      const mockTransactions: SaleTransaction[] = [
-        {
-          id: "sale-1",
-          car_make: "Toyota",
-          car_model: "Corolla",
-          car_year: 2018,
-          registration_number: "ABC-123",
-          purchase_price: 250000,
-          asking_price: 280000,
-          status: "sold",
-          sold_price: 275000,
-          sale_date: "2024-01-15",
-          created_at: "2023-12-20",
-        },
-        {
-          id: "sale-2",
-          car_make: "Honda",
-          car_model: "Civic",
-          car_year: 2019,
-          registration_number: "XYZ-456",
-          purchase_price: 350000,
-          asking_price: 380000,
-          status: "available",
-          sale_date: "2024-01-10",
-          created_at: "2024-01-10",
-        },
-        {
-          id: "sale-3",
-          car_make: "Suzuki",
-          car_model: "Cultus",
-          car_year: 2017,
-          registration_number: "DEF-789",
-          purchase_price: 180000,
-          asking_price: 200000,
-          status: "sold",
-          sold_price: 195000,
-          sale_date: "2023-12-28",
-          created_at: "2023-12-10",
-        },
-      ]
+      // Use actual seller data from database
+      const sellerDetail: SellerDetail = {
+        ...sellerData,
+        average_car_price: sellerData.total_cars_sold > 0
+          ? sellerData.total_amount_paid / sellerData.total_cars_sold
+          : 0,
+        first_sale_date: sellerData.created_at,
+        last_sale_date: sellerData.last_sale_date,
+      }
 
-      setSeller(mockSeller)
-      setTransactions(mockTransactions)
+      // Load actual car transactions for this seller
+      const sellerCars = await getCarsBySellerId(sellerId)
+
+      // Get sold car data for cars that are sold (with error handling)
+      const carIds = sellerCars.map(car => car.id)
+      let soldCarsData = []
+
+      try {
+        soldCarsData = await getSoldCarsByCarIds(carIds)
+      } catch (soldCarsError: any) {
+        // Continue without sold car data - will just show cars without sold prices
+        // (getSoldCarsByCarIds already handles missing table gracefully)
+        soldCarsData = []
+      }
+
+      // Create a map of car_id to sold car data
+      const soldCarsMap = new Map()
+      soldCarsData.forEach(soldCar => {
+        soldCarsMap.set(soldCar.car_id, soldCar)
+      })
+
+      // Convert cars to SaleTransaction format
+      const actualTransactions: SaleTransaction[] = sellerCars.map(car => {
+        const soldCarInfo = soldCarsMap.get(car.id)
+        return {
+          id: car.id,
+          car_make: car.make,
+          car_model: car.model,
+          car_year: car.year,
+          registration_number: car.registration_number,
+          purchase_price: car.purchase_price,
+          asking_price: car.asking_price,
+          status: car.status,
+          sold_price: soldCarInfo ? soldCarInfo.sale_price : undefined,
+          sale_date: soldCarInfo ? soldCarInfo.sale_date : car.purchase_date,
+          created_at: car.created_at,
+        }
+      })
+
+      setSeller(sellerDetail)
+      setTransactions(actualTransactions)
     } catch (error: any) {
       console.error("Error loading seller details:", error)
       setError(`Failed to load seller details: ${error.message}`)
@@ -503,6 +497,18 @@ export default function SellerDetailPage() {
                                 </div>
                               </div>
                             )}
+                          </div>
+
+                          <div className="flex gap-2 ml-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => router.push(`/dashboard/cars/${transaction.id}`)}
+                              className="text-blue-600 hover:text-blue-700"
+                            >
+                              <Eye className="w-4 h-4 mr-1" />
+                              View Details
+                            </Button>
                           </div>
                         </div>
                       </div>

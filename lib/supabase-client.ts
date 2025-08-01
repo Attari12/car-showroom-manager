@@ -767,6 +767,73 @@ export async function deleteInvestor(id: string) {
   }
 }
 
+export async function recalculateInvestorProfits(clientId: string) {
+  try {
+    // Get all investors for this client
+    const investors = await getInvestors(clientId)
+
+    // For each investor, calculate their profits from actual investments
+    for (const investor of investors) {
+      let totalInvestment = 0
+      let totalProfit = 0
+      let activeInvestments = 0
+
+      // Get all investments for this investor
+      const investments = await getInvestmentsByInvestorId(investor.id)
+
+      for (const investment of investments) {
+        if (!investment.car) continue
+
+        // Add to total investment
+        totalInvestment += investment.investment_amount
+
+        // Check if car is active
+        if (investment.car.status !== 'sold') {
+          activeInvestments++
+        } else {
+          // Car is sold, try to get sold car data for profit calculation
+          try {
+            const { data: soldCarData, error: soldError } = await supabase
+              .from("sold_cars")
+              .select("*")
+              .eq("car_id", investment.car.id)
+              .single()
+
+            if (!soldError && soldCarData) {
+              // Calculate this investor's share of the profit
+              const grossProfit = soldCarData.sale_price - investment.car.purchase_price
+              const totalCommissions = (soldCarData.purchase_commission || 0) +
+                                     (soldCarData.sale_commission || 0)
+              const netProfit = Math.max(0, grossProfit - totalCommissions)
+
+              // Calculate investor's profit share based on ownership percentage
+              const investorProfitShare = netProfit * (investment.ownership_percentage / 100)
+              totalProfit += investorProfitShare
+            }
+          } catch (soldCarError) {
+            // If sold_cars table doesn't exist or has issues, continue without profit calculation
+            console.info("Could not calculate profit for sold car", investment.car.id)
+          }
+        }
+      }
+
+      // Update investor with calculated values
+      await updateInvestor(investor.id, {
+        total_investment: totalInvestment,
+        total_profit: totalProfit,
+        active_investments: activeInvestments,
+      })
+
+      console.log(`Updated investor ${investor.name}: ₨${totalInvestment} invested, ₨${totalProfit} profit, ${activeInvestments} active`)
+    }
+
+    return { success: true, message: "Investor profits recalculated successfully" }
+  } catch (error: any) {
+    console.error("Error recalculating investor profits:", error)
+    throw error
+  }
+}
+
 // Seller operations
 export async function getSellers(clientId: string) {
   try {
@@ -872,6 +939,65 @@ export async function deleteSeller(id: string) {
   }
 }
 
+export async function getCarsBySellerId(sellerId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("cars")
+      .select("*")
+      .eq("seller_id", sellerId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error in getCarsBySellerId:", JSON.stringify(error, null, 2))
+      throw new Error(`Failed to get cars by seller: ${error.message || JSON.stringify(error)}`)
+    }
+    return data || []
+  } catch (error: any) {
+    console.error("Error in getCarsBySellerId:", error?.message || error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to get cars by seller: ${error}`)
+  }
+}
+
+export async function getSoldCarsByCarIds(carIds: string[]) {
+  try {
+    if (carIds.length === 0) return []
+
+    const { data, error } = await supabase
+      .from("sold_cars")
+      .select("*")
+      .in("car_id", carIds)
+
+    if (error) {
+      // If table doesn't exist, just warn and return empty array (this is expected)
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        console.info("sold_cars table not set up yet - continuing without sold car data")
+        return []
+      }
+
+      // For other errors, log as error and throw
+      console.error("Supabase error in getSoldCarsByCarIds:", JSON.stringify(error, null, 2))
+      throw new Error(`Failed to get sold cars: ${error.message || JSON.stringify(error)}`)
+    }
+    return data || []
+  } catch (error: any) {
+    // If it's a "table doesn't exist" error, just return empty array quietly
+    if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+      console.info("sold_cars table not set up yet - continuing without sold car data")
+      return []
+    }
+
+    // For other errors, log and throw
+    console.error("Error in getSoldCarsByCarIds:", error?.message || error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error(`Failed to get sold cars: ${error}`)
+  }
+}
+
 // Car Investment operations
 export async function getCarInvestments(carId: string) {
   try {
@@ -890,6 +1016,51 @@ export async function getCarInvestments(carId: string) {
     return data || []
   } catch (error) {
     console.error("Error in getCarInvestments:", error)
+    throw error
+  }
+}
+
+export async function getInvestmentsByInvestorId(investorId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("car_investments")
+      .select(`
+        *,
+        car:cars(
+          id,
+          make,
+          model,
+          year,
+          registration_number,
+          purchase_price,
+          asking_price,
+          status,
+          purchase_date,
+          created_at
+        )
+      `)
+      .eq("investor_id", investorId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      // If car_investments table doesn't exist, return empty array
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        console.info("car_investments table not set up yet - returning empty investments")
+        return []
+      }
+
+      console.error("Supabase error:", error)
+      throw error
+    }
+    return data || []
+  } catch (error: any) {
+    // If it's a "table doesn't exist" error, return empty array
+    if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+      console.info("car_investments table not set up yet - returning empty investments")
+      return []
+    }
+
+    console.error("Error in getInvestmentsByInvestorId:", error)
     throw error
   }
 }
@@ -1311,6 +1482,7 @@ export const dbOperations = {
   updateSeller,
   deleteSeller,
   getCarInvestments,
+  getInvestmentsByInvestorId,
   createCarInvestment,
   uploadFile,
   deleteFile,
