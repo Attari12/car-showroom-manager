@@ -46,6 +46,8 @@ export default function DashboardPage() {
   const [selectedBuyerId, setSelectedBuyerId] = useState("")
   const [selectedDealerId, setSelectedDealerId] = useState("")
   const [monthlyShowroomProfit, setMonthlyShowroomProfit] = useState<number>(0)
+  const [actualInvestorProfit, setActualInvestorProfit] = useState<number>(0)
+  const [actualCommissionEarnings, setActualCommissionEarnings] = useState<number>(0)
 
   // Edit car state
   const [editingCar, setEditingCar] = useState<CarType | null>(null)
@@ -102,6 +104,16 @@ export default function DashboardPage() {
       // Calculate profit asynchronously without blocking
       calculateMonthlyShowroomProfit(soldCarsThisMonth).catch(console.error)
 
+      // Calculate actual investor profit from sold cars
+      calculateActualInvestorProfit(soldCarsThisMonth).then(profit => {
+        setActualInvestorProfit(profit)
+      }).catch(console.error)
+
+      // Calculate actual commission earnings from sold cars
+      calculateActualCommissionEarnings(soldCarsThisMonth).then(commission => {
+        setActualCommissionEarnings(commission)
+      }).catch(console.error)
+
       // Also load buyers and dealers for the dropdowns
       await loadBuyers(clientId)
       await loadDealers(clientId)
@@ -139,6 +151,125 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Error calculating monthly showroom profit:', error)
       setMonthlyShowroomProfit(0)
+    }
+  }
+
+  const calculateActualInvestorProfit = async (soldCars: CarType[]) => {
+    try {
+      let totalInvestorProfit = 0
+
+      for (const car of soldCars) {
+        try {
+          // Get car investments
+          const investments = await getCarInvestments(car.id)
+
+          // Get money spent from description (same logic as sold-cars page)
+          let moneySpent = 0
+          if (car.description) {
+            const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+            if (moneySpentMatch) {
+              moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+            }
+          }
+
+          // Create profit distribution data (same as sold-cars page)
+          const saleData = {
+            purchase_price: car.purchase_price,
+            sold_price: car.asking_price,
+            additional_expenses: (car.repair_costs || 0) + (car.additional_expenses || 0) + moneySpent,
+            purchase_commission: car.purchase_commission || 0,
+            dealer_commission: car.dealer_commission || 0,
+            investment: {
+              showroom_investment: car.showroom_investment || 0,
+              investors: investments.map(inv => ({
+                id: inv.investor_id,
+                name: inv.investor?.name || 'Unknown',
+                cnic: inv.investor?.cnic || '',
+                investment_amount: inv.investment_amount || 0
+              })),
+              ownership_type: car.ownership_type || 'partially_owned' as const,
+              commission_type: car.commission_type || 'flat' as const,
+              commission_amount: car.commission_amount || 0,
+              commission_percentage: car.commission_percentage || 0
+            }
+          }
+
+          const distribution = calculateProfitDistribution(saleData)
+
+          // Sum up all investor shares
+          const carInvestorProfit = distribution.investor_shares.reduce((sum, share) => sum + share.profit_share, 0)
+          totalInvestorProfit += carInvestorProfit
+
+        } catch (error) {
+          console.error(`Error calculating profit for car ${car.id}:`, error)
+          // Continue with other cars
+        }
+      }
+
+      return totalInvestorProfit
+    } catch (error) {
+      console.error('Error calculating actual investor profit:', error)
+      return 0
+    }
+  }
+
+  const calculateActualCommissionEarnings = async (soldCars: CarType[]) => {
+    try {
+      let totalCommissionEarnings = 0
+
+      for (const car of soldCars) {
+        try {
+          // Get car investments
+          const investments = await getCarInvestments(car.id)
+
+          // Get money spent from description (same logic as sold-cars page)
+          let moneySpent = 0
+          if (car.description) {
+            const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+            if (moneySpentMatch) {
+              moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+            }
+          }
+
+          // Create profit distribution data (same as sold-cars page)
+          const saleData = {
+            purchase_price: car.purchase_price,
+            sold_price: car.asking_price,
+            additional_expenses: (car.repair_costs || 0) + (car.additional_expenses || 0) + moneySpent,
+            purchase_commission: car.purchase_commission || 0,
+            dealer_commission: car.dealer_commission || 0,
+            investment: {
+              showroom_investment: car.showroom_investment || 0,
+              investors: investments.map(inv => ({
+                id: inv.investor_id,
+                name: inv.investor?.name || 'Unknown',
+                cnic: inv.investor?.cnic || '',
+                investment_amount: inv.investment_amount || 0
+              })),
+              ownership_type: car.ownership_type || 'partially_owned' as const,
+              commission_type: car.commission_type || 'flat' as const,
+              commission_amount: car.commission_amount || 0,
+              commission_percentage: car.commission_percentage || 0
+            }
+          }
+
+          const distribution = calculateProfitDistribution(saleData)
+
+          // Only count showroom profit where ownership percentage is 0.0% (pure commission)
+          if (distribution.showroom_share.percentage === 0 && distribution.showroom_share.source === 'commission') {
+            totalCommissionEarnings += distribution.showroom_share.amount
+          }
+
+        } catch (error) {
+          console.error(`Error calculating commission for car ${car.id}:`, error)
+          // Continue with other cars
+        }
+      }
+
+      return totalCommissionEarnings
+    } catch (error) {
+      console.error('Error calculating actual commission earnings:', error)
+      return 0
     }
   }
 
@@ -393,11 +524,10 @@ export default function DashboardPage() {
   // Use the calculated showroom profit instead of total profit
   const monthlyProfit = monthlyShowroomProfit
 
-  // Mock calculation for investor-related metrics
-  const showroomOnlyProfit = monthlyProfit * 0.7 // Assume 70% is showroom's share
-  const investorProfit = monthlyProfit * 0.3 // Assume 30% goes to investors
-  const commissionEarnings = monthlyProfit * 0.1 // Assume 10% from commissions
-  const totalInvestorCars = cars.filter(car => car.status === "available").length * 0.4 // Mock: 40% have investors
+  // Real calculation for investor-related metrics
+  const investorProfit = actualInvestorProfit // Actual investor profit from sold cars
+  const showroomOnlyProfit = monthlyProfit - investorProfit // Remaining profit is showroom's
+  const commissionEarnings = actualCommissionEarnings // Actual commission earnings from sold cars
   const totalShowroomInvestment = cars.reduce((sum, car) => sum + (car.purchase_price * 0.6), 0) // Mock: showroom invests 60%
   const totalInvestorInvestment = cars.reduce((sum, car) => sum + (car.purchase_price * 0.4), 0) // Mock: investors provide 40%
 
@@ -487,42 +617,6 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Inventory Value</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
-              <p className="text-xs text-muted-foreground">Available cars value</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Investment & Profit Distribution Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Showroom Profit</CardTitle>
-              <Building2 className="h-4 w-4 text-purple-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-purple-600">{formatCurrency(showroomOnlyProfit)}</div>
-              <p className="text-xs text-muted-foreground">Ownership + Commission</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Investor Profit</CardTitle>
-              <Users className="h-4 w-4 text-orange-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-orange-600">{formatCurrency(investorProfit)}</div>
-              <p className="text-xs text-muted-foreground">Distributed to investors</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Commission Earnings</CardTitle>
               <Percent className="h-4 w-4 text-indigo-500" />
             </CardHeader>
@@ -531,15 +625,27 @@ export default function DashboardPage() {
               <p className="text-xs text-muted-foreground">From investor-owned cars</p>
             </CardContent>
           </Card>
+        </div>
 
+        {/* Investment & Profit Distribution Cards */}
+        <div className="grid grid-cols-1 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Investor Cars</CardTitle>
-              <TrendingUp className="h-4 w-4 text-cyan-500" />
+              <CardTitle className="text-sm font-medium">Investor Profit</CardTitle>
+              <Users className="h-4 w-4 text-orange-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-cyan-600">{Math.round(totalInvestorCars)}</div>
-              <p className="text-xs text-muted-foreground">Cars with external investment</p>
+              <div className="text-2xl font-bold text-orange-600">{formatCurrency(investorProfit)}</div>
+              <p className="text-xs text-muted-foreground">Distributed to investors</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 w-full"
+                onClick={() => router.push('/dashboard/investor-profits')}
+              >
+                <Eye className="w-4 h-4 mr-2" />
+                View Details
+              </Button>
             </CardContent>
           </Card>
         </div>

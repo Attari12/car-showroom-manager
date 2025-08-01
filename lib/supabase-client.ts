@@ -1078,13 +1078,37 @@ export async function getCarInvestments(carId: string) {
       .eq("car_id", carId)
 
     if (error) {
-      console.error("Supabase error:", error)
-      throw error
+      console.error("Supabase error in getCarInvestments:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        carId
+      })
+
+      // If table doesn't exist, return empty array
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+        console.info('car_investments table does not exist yet - returning empty investments')
+        return []
+      }
+
+      throw new Error(`Failed to get car investments: ${error.message || 'Unknown error'}`)
     }
     return data || []
-  } catch (error) {
-    console.error("Error in getCarInvestments:", error)
-    throw error
+  } catch (error: any) {
+    console.error("Error in getCarInvestments:", {
+      message: error?.message || error,
+      stack: error?.stack,
+      carId
+    })
+
+    // If it's a "table doesn't exist" error, return empty array
+    if (error?.message?.includes('does not exist') || error?.code === '42P01' || error?.code === 'PGRST116') {
+      console.info('car_investments table does not exist yet - returning empty investments')
+      return []
+    }
+
+    throw new Error(`Failed to get car investments: ${error?.message || error}`)
   }
 }
 
@@ -1117,8 +1141,13 @@ export async function getInvestmentsByInvestorId(investorId: string) {
         return []
       }
 
-      console.error("Supabase error:", error)
-      throw error
+      console.error("Supabase error in getInvestmentsByInvestorId:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
+      throw new Error(`Failed to get investments by investor: ${error.message || 'Unknown error'}`)
     }
     return data || []
   } catch (error: any) {
@@ -1128,8 +1157,11 @@ export async function getInvestmentsByInvestorId(investorId: string) {
       return []
     }
 
-    console.error("Error in getInvestmentsByInvestorId:", error)
-    throw error
+    console.error("Error in getInvestmentsByInvestorId:", {
+      message: error?.message || error,
+      stack: error?.stack
+    })
+    throw new Error(`Failed to get investments by investor: ${error?.message || error}`)
   }
 }
 
