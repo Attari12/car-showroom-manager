@@ -114,6 +114,11 @@ export default function DashboardPage() {
         setActualCommissionEarnings(commission)
       }).catch(console.error)
 
+      // Calculate total external investment from all car investments
+      calculateTotalExternalInvestment(carsData).then(investment => {
+        setTotalInvestorInvestment(investment)
+      }).catch(console.error)
+
       // Also load buyers and dealers for the dropdowns
       await loadBuyers(clientId)
       await loadDealers(clientId)
@@ -269,6 +274,35 @@ export default function DashboardPage() {
       return totalCommissionEarnings
     } catch (error) {
       console.error('Error calculating actual commission earnings:', error)
+      return 0
+    }
+  }
+
+  const calculateTotalExternalInvestment = async (carsData: CarType[]) => {
+    try {
+      let totalExternalInvestment = 0
+
+      // Only calculate for available cars (current inventory)
+      const availableCars = carsData.filter(car => car.status === 'available')
+
+      for (const car of availableCars) {
+        try {
+          // Get car investments for this available car
+          const investments = await getCarInvestments(car.id)
+
+          // Sum up all investor investments for this available car
+          const carExternalInvestment = investments.reduce((sum, inv) => sum + (inv.investment_amount || 0), 0)
+          totalExternalInvestment += carExternalInvestment
+
+        } catch (error) {
+          console.error(`Error getting investments for car ${car.id}:`, error)
+          // Continue with other cars
+        }
+      }
+
+      return totalExternalInvestment
+    } catch (error) {
+      console.error('Error calculating total external investment:', error)
       return 0
     }
   }
@@ -528,8 +562,12 @@ export default function DashboardPage() {
   const investorProfit = actualInvestorProfit // Actual investor profit from sold cars
   const showroomOnlyProfit = monthlyProfit - investorProfit // Remaining profit is showroom's
   const commissionEarnings = actualCommissionEarnings // Actual commission earnings from sold cars
-  const totalShowroomInvestment = cars.reduce((sum, car) => sum + (car.purchase_price * 0.6), 0) // Mock: showroom invests 60%
-  const totalInvestorInvestment = cars.reduce((sum, car) => sum + (car.purchase_price * 0.4), 0) // Mock: investors provide 40%
+
+  // Calculate total showroom investment from actual showroom_investment field (only available cars)
+  const totalShowroomInvestment = cars.filter(car => car.status === 'available').reduce((sum, car) => sum + (car.showroom_investment || 0), 0)
+
+  // Calculate total external investment from car_investments table
+  const [totalInvestorInvestment, setTotalInvestorInvestment] = useState(0)
 
   if (!clientId) {
     return (
@@ -659,78 +697,18 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Showroom Investment:</span>
-                  <span className="font-medium">{formatCurrency(totalShowroomInvestment)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">External Investment:</span>
-                  <span className="font-medium">{formatCurrency(totalInvestorInvestment)}</span>
-                </div>
-                <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>Total Investment:</span>
-                  <span>{formatCurrency(totalShowroomInvestment + totalInvestorInvestment)}</span>
-                </div>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Showroom Investment in Car Inventory:</span>
+                <span className="font-medium">{formatCurrency(totalShowroomInvestment)}</span>
               </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Showroom ROI:</span>
-                  <span className="font-medium text-green-600">
-                    {totalShowroomInvestment > 0 ? ((showroomOnlyProfit / totalShowroomInvestment) * 100).toFixed(1) : 0}%
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Investor ROI:</span>
-                  <span className="font-medium text-blue-600">
-                    {totalInvestorInvestment > 0 ? ((investorProfit / totalInvestorInvestment) * 100).toFixed(1) : 0}%
-                  </span>
-                </div>
-                <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>Overall ROI:</span>
-                  <span className="text-purple-600">
-                    {(totalShowroomInvestment + totalInvestorInvestment) > 0
-                      ? (((monthlyProfit) / (totalShowroomInvestment + totalInvestorInvestment)) * 100).toFixed(1)
-                      : 0}%
-                  </span>
-                </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Total External Investment in Car Inventory:</span>
+                <span className="font-medium">{formatCurrency(totalInvestorInvestment)}</span>
               </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Profit Distribution:</span>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-sm">
-                    <span>Showroom:</span>
-                    <span>{monthlyProfit > 0 ? ((showroomOnlyProfit / monthlyProfit) * 100).toFixed(1) : 0}%</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Investors:</span>
-                    <span>{monthlyProfit > 0 ? ((investorProfit / monthlyProfit) * 100).toFixed(1) : 0}%</span>
-                  </div>
-                </div>
-                <div className="mt-2 pt-2 border-t">
-                  <div className="text-sm text-gray-600">Quick Actions:</div>
-                  <div className="flex gap-2 mt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push('/dashboard/investors')}
-                    >
-                      Manage Investors
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push('/dashboard/sellers')}
-                    >
-                      Manage Sellers
-                    </Button>
-                  </div>
-                </div>
+              <div className="flex justify-between font-semibold border-t pt-2">
+                <span>Total Investment:</span>
+                <span>{formatCurrency(totalShowroomInvestment + totalInvestorInvestment)}</span>
               </div>
             </div>
           </CardContent>

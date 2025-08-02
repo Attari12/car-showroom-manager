@@ -90,8 +90,8 @@ export default function LoginPage() {
           <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <Car className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Car Showroom Manager</h1>
-          <p className="text-gray-600 mt-2">Professional automotive inventory management</p>
+          <h1 className="text-3xl font-bold text-gray-700">Car Showroom Manager</h1>
+          <p className="text-gray-500 mt-2">Professional automotive inventory management</p>
         </div>
 
         {/* Connection Status */}
@@ -178,15 +178,15 @@ export default function LoginPage() {
         </Card>
 
         {/* Help Text */}
-        <div className="mt-6 text-center text-sm text-gray-600">
+        <div className="mt-6 text-center text-sm text-gray-500">
           <p>System automatically detects admin vs client login</p>
           <p className="mt-2">Contact administrator for account access</p>
 
           {/* Debug info - remove in production */}
           {process.env.NODE_ENV === "development" && (
-            <div className="mt-4 p-3 bg-gray-100 rounded text-xs text-left">
+            <div className="mt-4 p-3 bg-gray-50 rounded text-xs text-left text-gray-500">
               <p>
-                <strong>Debug Info:</strong>
+                <strong className="text-gray-600">Debug Info:</strong>
               </p>
               <p>Admin: admin / admin123</p>
               <p>Test Client: test_client / test123</p>

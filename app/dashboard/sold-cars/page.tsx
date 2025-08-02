@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Car, DollarSign, TrendingUp, Search, Eye, AlertCircle, Calendar } from "lucide-react"
+import { Car, DollarSign, TrendingUp, Search, Eye, AlertCircle, Calendar, Users } from "lucide-react"
 import { getCars, getCarInvestments, type Car as CarType } from "@/lib/supabase-client"
 import { calculateProfitDistribution, calculateBaseProfit, type CarSaleData, type CarInvestment as CarInvestmentType } from "@/lib/profit-calculations"
 
@@ -167,6 +167,12 @@ export default function SoldCarsPage() {
 
   const totalExpenses = filteredCars.reduce((sum, car) => sum + getMoneySpent(car), 0)
 
+  // Calculate total investor profit from sold cars
+  const totalInvestorProfit = filteredCars.reduce((sum, car) => {
+    const distribution = calculateDetailedProfitDistribution(car)
+    return sum + distribution.investor_shares.reduce((investorSum, share) => investorSum + share.profit_share, 0)
+  }, 0)
+
   const months = [
     "January",
     "February",
@@ -252,6 +258,26 @@ export default function SoldCarsPage() {
             <CardContent>
               <div className="text-2xl font-bold text-red-600">{formatCurrency(totalExpenses)}</div>
               <p className="text-xs text-muted-foreground">Money spent on cars</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Investor Profit</CardTitle>
+              <Users className="h-4 w-4 text-orange-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">{formatCurrency(totalInvestorProfit)}</div>
+              <p className="text-xs text-muted-foreground">Distributed to investors</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 w-full"
+                onClick={() => window.location.href = '/dashboard/investor-profits'}
+              >
+                <Eye className="w-4 h-4 mr-2" />
+                View Details
+              </Button>
             </CardContent>
           </Card>
         </div>
