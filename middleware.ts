@@ -2,26 +2,32 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
 export function middleware(request: NextRequest) {
-  // Get the pathname of the request
   const { pathname } = request.nextUrl
 
-  // Check if it's an admin route
-  if (pathname.startsWith("/admin")) {
-    // In a real app, you'd check for proper authentication tokens
-    // For now, we'll let the client-side handle the redirect
+  // Skip middleware for static files and API routes to prevent RSC issues
+  if (
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/static/') ||
+    pathname.includes('.')
+  ) {
     return NextResponse.next()
   }
 
-  // Check if it's a client dashboard route
-  if (pathname.startsWith("/dashboard")) {
-    // In a real app, you'd check for proper authentication tokens
-    // For now, we'll let the client-side handle the redirect
-    return NextResponse.next()
-  }
-
+  // Simple passthrough for protected routes
+  // Authentication is handled client-side to avoid RSC conflicts
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/dashboard/:path*"],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     */
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ],
 }

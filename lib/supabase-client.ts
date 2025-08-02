@@ -12,8 +12,26 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Missing Supabase configuration')
 }
 
-// Create Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Create Supabase client with enhanced options
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false, // Disable session persistence to avoid client-side issues
+    autoRefreshToken: false,
+  },
+  db: {
+    schema: 'public',
+  },
+  global: {
+    headers: {
+      'apikey': supabaseAnonKey,
+    },
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10,
+    },
+  },
+})
 
 // Database types
 export interface Client {
@@ -177,32 +195,44 @@ export interface InvestorDebt {
   updated_at: string
 }
 
-// Test database connection with timeout
-export async function testConnection() {
-  try {
-    console.log("Testing database connection...")
+// Enhanced connection test with retries
+export async function testConnection(retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`Testing database connection (attempt ${attempt}/${retries})...`)
 
-    // Create a promise that will timeout after 5 seconds
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Connection timeout")), 5000)
-    })
+      // Create a promise that will timeout after 10 seconds (increased)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Connection timeout")), 10000)
+      })
 
-    // Test the connection by trying to select from clients table
-    const connectionPromise = supabase.from("clients").select("id").limit(1)
+      // Test the connection by trying to select from clients table
+      const connectionPromise = supabase.from("clients").select("id").limit(1)
 
-    const { data, error } = (await Promise.race([connectionPromise, timeoutPromise])) as any
+      const { data, error } = await Promise.race([connectionPromise, timeoutPromise])
 
-    if (error) {
-      console.error("Connection test failed:", error)
-      return { success: false, error: error.message }
+      if (error) {
+        console.error(`Connection test failed (attempt ${attempt}):`, error)
+        if (attempt === retries) {
+          return { success: false, error: error.message }
+        }
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+        continue
+      }
+
+      console.log("Database connection successful")
+      return { success: true, data }
+    } catch (error: any) {
+      console.error(`Connection test error (attempt ${attempt}):`, error)
+      if (attempt === retries) {
+        return { success: false, error: error.message || "Connection failed" }
+      }
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
     }
-
-    console.log("Database connection successful")
-    return { success: true, data }
-  } catch (error: any) {
-    console.error("Connection test error:", error)
-    return { success: false, error: error.message || "Connection failed" }
   }
+  return { success: false, error: "Connection failed after retries" }
 }
 
 // Client operations
@@ -1066,50 +1096,73 @@ export async function getSoldCarsByCarIds(carIds: string[]) {
   }
 }
 
-// Car Investment operations
-export async function getCarInvestments(carId: string) {
-  try {
-    const { data, error } = await supabase
-      .from("car_investments")
-      .select(`
-        *,
-        investor:investors(*)
-      `)
-      .eq("car_id", carId)
+// Car Investment operations with enhanced error handling
+export async function getCarInvestments(carId: string, retries = 2) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const { data, error } = await supabase
+        .from("car_investments")
+        .select(`
+          *,
+          investor:investors(*)
+        `)
+        .eq("car_id", carId)
 
-    if (error) {
-      console.error("Supabase error in getCarInvestments:", {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
+      if (error) {
+        console.warn(`Supabase error in getCarInvestments (attempt ${attempt}):`, {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          carId
+        })
+
+        // If table doesn't exist, return empty array immediately
+        if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+          console.info('car_investments table does not exist yet - returning empty investments')
+          return []
+        }
+
+        // For network/connection errors, retry
+        if (attempt < retries && (error.message?.includes('Failed to fetch') || error.message?.includes('network') || error.code === 'ECONNRESET')) {
+          console.warn(`Network error on attempt ${attempt}, retrying...`)
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+          continue
+        }
+
+        throw new Error(`Failed to get car investments: ${error.message || 'Unknown error'}`)
+      }
+      return data || []
+    } catch (error: any) {
+      console.warn(`Error in getCarInvestments (attempt ${attempt}):`, {
+        message: error?.message || String(error),
+        stack: error?.stack,
         carId
       })
 
-      // If table doesn't exist, return empty array
-      if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('relation')) {
+      // If it's a "table doesn't exist" error, return empty array immediately
+      if (error?.message?.includes('does not exist') || error?.code === '42P01' || error?.code === 'PGRST116') {
         console.info('car_investments table does not exist yet - returning empty investments')
         return []
       }
 
-      throw new Error(`Failed to get car investments: ${error.message || 'Unknown error'}`)
-    }
-    return data || []
-  } catch (error: any) {
-    console.error("Error in getCarInvestments:", {
-      message: error?.message || error,
-      stack: error?.stack,
-      carId
-    })
+      // For network errors, retry
+      if (attempt < retries && (error?.message?.includes('Failed to fetch') || error?.message?.includes('TypeError: Failed to fetch') || error?.name === 'TypeError')) {
+        console.warn(`Network error on attempt ${attempt}, retrying...`)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+        continue
+      }
 
-    // If it's a "table doesn't exist" error, return empty array
-    if (error?.message?.includes('does not exist') || error?.code === '42P01' || error?.code === 'PGRST116') {
-      console.info('car_investments table does not exist yet - returning empty investments')
-      return []
+      // Last attempt or non-retryable error
+      if (attempt === retries) {
+        console.error(`Failed to get car investments after ${retries} attempts, returning empty array`)
+        return [] // Return empty array instead of throwing to prevent cascade failures
+      }
     }
-
-    throw new Error(`Failed to get car investments: ${error?.message || error}`)
   }
+
+  // Fallback return
+  return []
 }
 
 export async function getInvestmentsByInvestorId(investorId: string) {

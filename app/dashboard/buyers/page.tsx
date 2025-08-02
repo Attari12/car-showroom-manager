@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye, Download } from "lucide-react"
+import { ArrowLeft, Plus, Edit, Trash2, FileText, Eye, Download, RefreshCw } from "lucide-react"
 import { getBuyers, createBuyer, getCars, type Buyer as SupaBuyer, getFileUrl } from "@/lib/supabase-client"
+import { ErrorBoundary } from "@/components/error-boundary"
+import { NetworkStatus } from "@/components/network-status"
 
 interface Buyer extends SupaBuyer {
   totalPurchases: number
@@ -74,22 +76,66 @@ export default function BuyersPage() {
 
   const [buyers, setBuyers] = useState<Buyer[]>([])
 
-  const loadBuyers = async (clientId: string) => {
+  const loadBuyers = async (clientId: string, retries = 3) => {
     try {
       setLoading(true)
       setError("")
 
-      // Load buyers and cars in parallel
-      const [buyersData, carsData] = await Promise.all([
-        getBuyers(clientId),
-        getCars(clientId)
-      ])
+      // Load buyers and cars in parallel with retry logic
+      let buyersData, carsData;
 
-      // Calculate purchase statistics for each buyer
-      const transformedBuyers: Buyer[] = buyersData.map(buyer => {
-        // Find cars purchased by this buyer (sold cars with matching buyer_id)
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          [buyersData, carsData] = await Promise.all([
+            getBuyers(clientId),
+            getCars(clientId)
+          ]);
+          break; // Success, exit retry loop
+        } catch (fetchError: any) {
+          if (attempt === retries) {
+            throw fetchError; // Last attempt, re-throw error
+          }
+          console.warn(`Fetch attempt ${attempt} failed, retrying...`, fetchError.message);
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
+      }
+
+      // Consolidate buyers by CNIC (to handle duplicates)
+      const buyerMap = new Map<string, Buyer>()
+
+      buyersData.forEach(buyer => {
+        const existingBuyer = buyerMap.get(buyer.cnic)
+
+        if (existingBuyer) {
+          // If we already have a buyer with this CNIC, keep the most recent one
+          // but preserve the original ID for database consistency
+          if (new Date(buyer.created_at) > new Date(existingBuyer.created_at)) {
+            buyerMap.set(buyer.cnic, {
+              ...buyer,
+              totalPurchases: 0,
+              totalSpent: 0,
+            })
+          }
+        } else {
+          // First time seeing this CNIC
+          buyerMap.set(buyer.cnic, {
+            ...buyer,
+            totalPurchases: 0,
+            totalSpent: 0,
+          })
+        }
+      })
+
+      // Calculate purchase statistics for each consolidated buyer
+      const transformedBuyers: Buyer[] = Array.from(buyerMap.values()).map(buyer => {
+        // Find all buyers with the same CNIC to get all their purchases
+        const allBuyersWithSameCnic = buyersData.filter(b => b.cnic === buyer.cnic)
+        const allBuyerIds = allBuyersWithSameCnic.map(b => b.id)
+
+        // Find cars purchased by any buyer with this CNIC
         const buyerCars = carsData.filter(car =>
-          car.buyer_id === buyer.id && car.status === "sold"
+          allBuyerIds.includes(car.buyer_id || '') && car.status === "sold"
         )
 
         // Calculate total purchases and total spent
@@ -103,25 +149,42 @@ export default function BuyersPage() {
         }
       })
 
-      // Also update car purchases data for the purchases tab
+      // Also update car purchases data for the purchases tab (consolidate by CNIC)
       const allCarPurchases: CarPurchase[] = carsData
         .filter(car => car.buyer_id && car.status === "sold")
-        .map(car => ({
-          id: car.id,
-          buyerId: car.buyer_id!,
-          carMake: car.make,
-          carModel: car.model,
-          carYear: car.year,
-          registrationNumber: car.registration_number,
-          purchasePrice: car.asking_price, // This is the sold price
-          purchaseDate: car.updated_at.split('T')[0], // Sale date
-        }))
+        .map(car => {
+          // Find the buyer info for this car
+          const carBuyer = buyersData.find(b => b.id === car.buyer_id)
+          if (!carBuyer) return null
+
+          // Find the consolidated buyer with the same CNIC
+          const consolidatedBuyer = transformedBuyers.find(b => b.cnic === carBuyer.cnic)
+
+          return {
+            id: car.id,
+            buyerId: consolidatedBuyer?.id || car.buyer_id!,
+            carMake: car.make,
+            carModel: car.model,
+            carYear: car.year,
+            registrationNumber: car.registration_number,
+            purchasePrice: car.asking_price, // This is the sold price
+            purchaseDate: car.updated_at.split('T')[0], // Sale date
+          }
+        })
+        .filter(purchase => purchase !== null) as CarPurchase[]
 
       setBuyers(transformedBuyers)
       setCarPurchases(allCarPurchases)
     } catch (error: any) {
       console.error("Error loading buyers:", error)
-      setError(`Failed to load buyers: ${error.message}`)
+      // Provide more specific error messages
+      if (error.message?.includes('Failed to fetch')) {
+        setError('Network connection issue. Please check your internet connection and try again.')
+      } else if (error.message?.includes('timeout')) {
+        setError('Request timed out. Please try again.')
+      } else {
+        setError(`Failed to load buyers: ${error.message}`)
+      }
     } finally {
       setLoading(false)
     }
@@ -376,7 +439,8 @@ export default function BuyersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -391,6 +455,9 @@ export default function BuyersPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Network Status */}
+        <NetworkStatus />
+
         {/* Success/Error Messages */}
         {success && (
           <div className="mb-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
@@ -400,6 +467,19 @@ export default function BuyersPage() {
         {error && (
           <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             {error}
+            {error.includes('Network') && (
+              <div className="mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadBuyers(clientId)}
+                  className="text-xs"
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Retry Loading
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -932,6 +1012,7 @@ export default function BuyersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </ErrorBoundary>
   )
 }

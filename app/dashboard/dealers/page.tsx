@@ -93,14 +93,106 @@ export default function DealersPage() {
         getDealerDebts(clientId)
       ])
 
-      // Calculate deal statistics for each dealer
-      const transformedDealers: Dealer[] = dealersData.map(dealer => {
-        // Find cars dealt by this dealer
-        const dealerCars = carsData.filter(car => car.dealer_id === dealer.id)
+      // Consolidate dealers by CNIC (to handle duplicates)
+      const dealerMap = new Map<string, Dealer>()
 
-        // Calculate total deals and total commission
-        const totalDeals = dealerCars.length
-        const totalCommission = dealerCars.reduce((sum, car) => sum + (car.dealer_commission || 0), 0)
+      dealersData.forEach(dealer => {
+        const existingDealer = dealerMap.get(dealer.cnic)
+
+        if (existingDealer) {
+          // If we already have a dealer with this CNIC, keep the most recent one
+          // but store all IDs for this CNIC for later use
+          if (new Date(dealer.created_at) > new Date(existingDealer.created_at)) {
+            dealerMap.set(dealer.cnic, {
+              ...dealer,
+              totalDeals: 0,
+              totalCommission: 0,
+            })
+          }
+        } else {
+          // First time seeing this CNIC
+          dealerMap.set(dealer.cnic, {
+            ...dealer,
+            totalDeals: 0,
+            totalCommission: 0,
+          })
+        }
+      })
+
+      // Calculate deal statistics for each consolidated dealer
+      const transformedDealers: Dealer[] = Array.from(dealerMap.values()).map(dealer => {
+        // Find all dealers with the same CNIC to get all their deals
+        const allDealersWithSameCnic = dealersData.filter(d => d.cnic === dealer.cnic)
+        const allDealerIds = allDealersWithSameCnic.map(d => d.id)
+
+        // Simple approach: count ALL cars that have ANY relationship with this dealer
+        let totalDeals = 0
+        let totalCommission = 0
+
+        // Go through each car and check if it should count for this dealer
+        carsData.forEach(car => {
+          let carCommission = 0
+          let shouldCount = false
+
+          // Always calculate commission for this car
+          const dealerCommission = car.dealer_commission || 0
+          const purchaseCommission = car.purchase_commission || 0
+          carCommission = dealerCommission + purchaseCommission
+
+          // Method 1: Check if car is directly linked to any dealer with this CNIC
+          if (allDealerIds.includes(car.dealer_id || '')) {
+            shouldCount = true
+          }
+
+          // Method 2: Check if car mentions this dealer in description (for sold cars)
+          if (!shouldCount && car.status === 'sold' && car.description) {
+            const mentionsDealer = allDealersWithSameCnic.some(d =>
+              car.description?.toLowerCase().includes(`dealer: ${d.name.toLowerCase()}`)
+            )
+            if (mentionsDealer) {
+              shouldCount = true
+            }
+          }
+
+          // Method 3: If car has commission but no direct link, it might still belong to this dealer
+          // This catches edge cases where dealer_id wasn't set properly
+          if (!shouldCount && carCommission > 0) {
+            // For debugging, we'll be more inclusive and see if this helps
+            // In a real scenario, you'd need more specific business logic here
+            shouldCount = false  // Keep false for now, but this is where edge cases would go
+          }
+
+          // Count this car if any method matched
+          if (shouldCount) {
+            totalDeals++
+            totalCommission += carCommission
+          }
+        })
+
+        // Debug only for Mania
+        if (dealer.name.toLowerCase() === 'mania') {
+          console.log(`\n=== MANIA DEBUG ===`)
+          console.log(`CNIC: ${dealer.cnic}`)
+          console.log(`All dealers with same CNIC:`, allDealersWithSameCnic.map(d => `${d.name} (${d.id})`))
+          console.log(`All dealer IDs: [${allDealerIds.join(', ')}]`)
+          console.log(`Final totals: Deals=${totalDeals}, Commission=${totalCommission}`)
+
+          // Check all cars and see which ones match
+          console.log(`Checking all ${carsData.length} cars:`)
+          carsData.forEach(car => {
+            if (allDealerIds.includes(car.dealer_id || '') ||
+                (car.dealer_commission && car.dealer_commission > 0) ||
+                (car.purchase_commission && car.purchase_commission > 0)) {
+              console.log(`  Car ${car.id} (${car.make} ${car.model}):`)
+              console.log(`    dealer_id: ${car.dealer_id}`)
+              console.log(`    dealer_commission: ${car.dealer_commission}`)
+              console.log(`    purchase_commission: ${car.purchase_commission}`)
+              console.log(`    status: ${car.status}`)
+              console.log(`    matches dealer_id: ${allDealerIds.includes(car.dealer_id || '')}`)
+            }
+          })
+          console.log(`=== END MANIA DEBUG ===\n`)
+        }
 
         return {
           ...dealer,
@@ -109,18 +201,31 @@ export default function DealersPage() {
         }
       })
 
-      // Also update car deals data for the deals tab
+      // Also update car deals data for the deals tab (consolidate by dealer CNIC)
       const allCarDeals: CarDeal[] = carsData
         .filter(car => car.dealer_id)
-        .map(car => ({
-          id: car.id,
-          dealerId: car.dealer_id!,
-          carMake: car.make,
-          carModel: car.model,
-          dealType: car.status === "sold" ? "sale" : "purchase",
-          commission: car.dealer_commission || 0,
-          date: car.updated_at.split('T')[0],
-        }))
+        .map(car => {
+          // Find the dealer info for this car
+          const carDealer = dealersData.find(d => d.id === car.dealer_id)
+          if (!carDealer) return null
+
+          // Find the consolidated dealer with the same CNIC
+          const consolidatedDealer = transformedDealers.find(d => d.cnic === carDealer.cnic)
+
+          // Include both dealer commission and purchase commission
+          const commission = (car.dealer_commission || 0) + (car.purchase_commission || 0)
+
+          return {
+            id: car.id,
+            dealerId: consolidatedDealer?.id || car.dealer_id!,
+            carMake: car.make,
+            carModel: car.model,
+            dealType: car.status === "sold" ? "sale" : "purchase",
+            commission: commission,
+            date: car.updated_at.split('T')[0],
+          }
+        })
+        .filter(deal => deal !== null) as CarDeal[]
 
       setDealers(transformedDealers)
       setCarDeals(allCarDeals)

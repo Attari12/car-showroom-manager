@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Improve development server stability
+  reactStrictMode: false, // Disable strict mode to prevent double renders in dev
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -9,62 +11,105 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@supabase/supabase-js'],
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
+    // Fix RSC payload issues
+    serverActions: true,
+    esmExternals: 'loose',
   },
   // Improve development performance and HMR
   env: {
     FAST_REFRESH: 'true',
   },
-  // Additional dev server optimizations
-  ...(process.env.NODE_ENV === 'development' && {
-    onDemandEntries: {
-      maxInactiveAge: 25 * 1000,
-      pagesBufferLength: 2,
-    },
-  }),
   images: {
     domains: ['saicjjshmgwsitmwvomj.supabase.co'],
     unoptimized: true,
   },
+  // Enhanced development configuration for better HMR stability
+  ...(process.env.NODE_ENV === 'development' && {
+    compress: false,
+    poweredByHeader: false,
+    generateEtags: false,
+    // Improve HMR reliability
+    onDemandEntries: {
+      maxInactiveAge: 60 * 1000,
+      pagesBufferLength: 5,
+    },
+    // Disable problematic optimizations
+    swcMinify: false,
+  }),
+
+  // Headers to prevent caching issues
+  async headers() {
+    if (process.env.NODE_ENV === 'development') {
+      return [
+        {
+          source: '/(.*)',
+          headers: [
+            {
+              key: 'Cache-Control',
+              value: 'no-cache, no-store, must-revalidate',
+            },
+            {
+              key: 'Pragma',
+              value: 'no-cache',
+            },
+            {
+              key: 'Expires',
+              value: '0',
+            },
+          ],
+        },
+      ];
+    }
+    return [];
+  },
   webpack: (config, { dev, isServer }) => {
-    if (dev && !isServer) {
+    if (dev) {
+      // Reduce HMR noise and improve stability
       config.infrastructureLogging = {
-        level: 'error',
+        level: 'warn',
       }
 
-      // Enhanced HMR configuration
+      // Enhanced watch options for better HMR
       config.watchOptions = {
-        poll: 1000,
-        aggregateTimeout: 300,
-        ignored: /node_modules/,
+        aggregateTimeout: 1000, // Increased to reduce rapid rebuilds
+        ignored: ['**/node_modules/**', '**/.git/**', '**/.next/**'],
+        // Add polling as fallback for network issues
+        poll: false,
       }
 
-      // Optimize chunks for better HMR
-      config.optimization = {
-        ...config.optimization,
-        splitChunks: {
-          ...config.optimization.splitChunks,
-          chunks: 'all',
-          cacheGroups: {
-            ...config.optimization.splitChunks?.cacheGroups,
-            default: {
-              chunks: 'all',
-              minChunks: 1,
-              priority: -20,
-              reuseExistingChunk: true,
+      // Fix client-side chunk loading issues
+      if (!isServer) {
+        config.resolve.fallback = {
+          ...config.resolve.fallback,
+          fs: false,
+          net: false,
+          tls: false,
+        }
+
+        // Improve HMR chunk loading
+        config.output = {
+          ...config.output,
+          hotUpdateChunkFilename: 'static/webpack/[id].[fullhash].hot-update.js',
+          hotUpdateMainFilename: 'static/webpack/[fullhash].hot-update.json',
+        }
+
+        // Add better error handling for chunk loading
+        config.optimization = {
+          ...config.optimization,
+          splitChunks: {
+            ...config.optimization.splitChunks,
+            chunks: 'all',
+            cacheGroups: {
+              ...config.optimization.splitChunks?.cacheGroups,
+              vendor: {
+                test: /[\\/]node_modules[\\/]/,
+                name: 'vendors',
+                chunks: 'all',
+                priority: 10,
+                reuseExistingChunk: true,
+              },
             },
           },
-        },
-      }
-
-      // Add fallback for webpack hmr failures
-      if (config.devServer) {
-        config.devServer.client = {
-          overlay: {
-            errors: true,
-            warnings: false,
-          },
-          reconnect: true,
-          webSocketTransport: 'ws',
         }
       }
     }

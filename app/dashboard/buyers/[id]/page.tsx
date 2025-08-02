@@ -8,7 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Car, DollarSign, Calendar, FileText, Eye } from "lucide-react"
-import { getBuyers, getCars, type Buyer as SupaBuyer, type Car as CarType } from "@/lib/supabase-client"
+import { getBuyers, getCars, getCarInvestments, type Buyer as SupaBuyer, type Car as CarType } from "@/lib/supabase-client"
+import { calculateProfitDistribution } from "@/lib/profit-calculations"
 
 interface Buyer extends SupaBuyer {
   // Additional computed fields
@@ -40,6 +41,7 @@ interface Debt {
 export default function BuyerDetailPage({ params }: { params: { id: string } }) {
   const [buyer, setBuyer] = useState<Buyer | null>(null)
   const [purchasedCars, setPurchasedCars] = useState<CarType[]>([])
+  const [carProfitDistributions, setCarProfitDistributions] = useState<Map<string, any>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [clientId, setClientId] = useState<string>("")
@@ -74,10 +76,76 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
 
       setBuyer(foundBuyer)
 
-      // Load cars and find cars purchased by this buyer
+      // Load cars and find ALL cars purchased by buyers with the same CNIC
       const cars = await getCars(clientId)
-      const buyerCars = cars.filter(car => car.buyer_id === params.id && car.status === "sold")
+
+      // Find all buyers with the same CNIC as the selected buyer
+      const buyersWithSameCnic = buyers.filter(b => b.cnic === foundBuyer.cnic)
+      const allBuyerIds = buyersWithSameCnic.map(b => b.id)
+
+      // Get all cars purchased by any buyer with this CNIC
+      const buyerCars = cars.filter(car =>
+        allBuyerIds.includes(car.buyer_id || '') && car.status === "sold"
+      )
+
       setPurchasedCars(buyerCars)
+
+      // Calculate profit distributions for each car
+      const distributionsMap = new Map()
+
+      for (const car of buyerCars) {
+        try {
+          // Get car investments
+          const investments = await getCarInvestments(car.id)
+
+          // Get money spent from description (same logic as sold-cars page)
+          let moneySpent = 0
+          if (car.description) {
+            const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+            if (moneySpentMatch) {
+              moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+            }
+          }
+
+          // Create profit distribution data (same as sold-cars page)
+          const saleData = {
+            purchase_price: car.purchase_price,
+            sold_price: car.asking_price,
+            additional_expenses: (car.repair_costs || 0) + (car.additional_expenses || 0) + moneySpent,
+            purchase_commission: car.purchase_commission || 0,
+            dealer_commission: car.dealer_commission || 0,
+            investment: {
+              showroom_investment: car.showroom_investment || 0,
+              investors: investments.map(inv => ({
+                id: inv.investor_id,
+                name: inv.investor?.name || 'Unknown',
+                cnic: inv.investor?.cnic || '',
+                investment_amount: inv.investment_amount || 0
+              })),
+              ownership_type: car.ownership_type || 'partially_owned' as const,
+              commission_type: car.commission_type || 'flat' as const,
+              commission_amount: car.commission_amount || 0,
+              commission_percentage: car.commission_percentage || 0
+            }
+          }
+
+          const distribution = calculateProfitDistribution(saleData)
+          distributionsMap.set(car.id, distribution)
+
+        } catch (error) {
+          console.error(`Error calculating profit for car ${car.id}:`, error)
+          // Set a fallback distribution
+          distributionsMap.set(car.id, {
+            showroom_share: {
+              amount: car.asking_price - car.purchase_price - (car.dealer_commission || 0),
+              percentage: 100,
+              source: 'ownership'
+            }
+          })
+        }
+      }
+
+      setCarProfitDistributions(distributionsMap)
 
     } catch (error: any) {
       console.error("Error loading buyer data:", error)
@@ -101,6 +169,11 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
 
   const totalPurchaseValue = purchasedCars.reduce((sum, car) => sum + car.asking_price, 0)
   const totalProfit = purchasedCars.reduce((sum, car) => {
+    const distribution = carProfitDistributions.get(car.id)
+    if (distribution && distribution.showroom_share) {
+      return sum + distribution.showroom_share.amount
+    }
+    // Fallback to simple calculation if no distribution data
     const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0)
     return sum + profit
   }, 0)
@@ -257,7 +330,11 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
               </TableHeader>
               <TableBody>
                 {purchasedCars.map((car) => {
-                  const profit = car.asking_price - car.purchase_price - (car.dealer_commission || 0)
+                  const distribution = carProfitDistributions.get(car.id)
+                  const showroomProfit = distribution?.showroom_share?.amount || 0
+                  const showroomPercentage = distribution?.showroom_share?.percentage || 0
+                  const profitSource = distribution?.showroom_share?.source || 'ownership'
+
                   return (
                     <TableRow key={car.id}>
                       <TableCell>
@@ -279,7 +356,20 @@ export default function BuyerDetailPage({ params }: { params: { id: string } }) 
                       <TableCell>{formatCurrency(car.purchase_price)}</TableCell>
                       <TableCell className="font-medium">{formatCurrency(car.asking_price)}</TableCell>
                       <TableCell>
-                        <span className="font-medium text-green-600">{formatCurrency(profit)}</span>
+                        <div>
+                          <div className="font-medium text-green-600">{formatCurrency(showroomProfit)}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Profit Distribution:
+                          </div>
+                          <div className="text-xs text-blue-600">
+                            Showroom ({showroomPercentage.toFixed(1)}%): {formatCurrency(showroomProfit)}
+                          </div>
+                          {profitSource === 'commission' && (
+                            <div className="text-xs text-orange-500 mt-1">
+                              Commission-based
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>{car.updated_at.split('T')[0]}</TableCell>
                       <TableCell>
