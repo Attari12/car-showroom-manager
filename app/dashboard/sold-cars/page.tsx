@@ -157,7 +157,14 @@ export default function SoldCarsPage() {
     return matchesSearch && matchesMonth
   })
 
-  const totalRevenue = filteredCars.reduce((sum, car) => sum + car.asking_price, 0)
+  // Calculate total revenue as sum of (purchase price + showroom profit share)
+  const totalRevenue = filteredCars.reduce((sum, car) => {
+    const distribution = calculateDetailedProfitDistribution(car)
+    return sum + car.purchase_price + distribution.showroom_share.amount
+  }, 0)
+
+  // Calculate total showroom investment (sum of purchase prices)
+  const totalShowroomInvestment = filteredCars.reduce((sum, car) => sum + car.purchase_price, 0)
 
   // Calculate total profit as sum of showroom profit shares only
   const totalProfit = filteredCars.reduce((sum, car) => {
@@ -236,6 +243,25 @@ export default function SoldCarsPage() {
             <CardContent>
               <div className="text-2xl font-bold">{formatCurrency(totalRevenue)}</div>
               <p className="text-xs text-muted-foreground">Gross sales</p>
+              <div className="mt-2 pt-2 border-t">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-600">Generated from Showroom investment:</span>
+                  <span className="font-medium">{formatCurrency(totalShowroomInvestment)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-600">Plus Showroom profit:</span>
+                  <span className="font-medium text-green-600">+{formatCurrency(totalRevenue - totalShowroomInvestment)}</span>
+                </div>
+                <div className="flex justify-between text-xs mt-1">
+                  <span className="text-gray-600">ROI of showroom:</span>
+                  <span className="font-medium text-blue-600">
+                    {totalShowroomInvestment > 0
+                      ? `${(((totalRevenue - totalShowroomInvestment) / totalShowroomInvestment) * 100).toFixed(2)}%`
+                      : '0%'
+                    }
+                  </span>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

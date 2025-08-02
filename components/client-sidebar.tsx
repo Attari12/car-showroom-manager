@@ -30,7 +30,8 @@ export function ClientSidebar() {
   }
 
   const handleNavigation = (href: string) => {
-    router.push(href)
+    // Use window.location to avoid fetch API conflicts with analytics
+    window.location.href = href
     setIsMobileMenuOpen(false)
   }
 

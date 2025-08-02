@@ -119,6 +119,17 @@ export default function DashboardPage() {
         setTotalInvestorInvestment(investment)
       }).catch(console.error)
 
+      // Calculate total net profit from sold cars
+      calculateTotalNetProfit(soldCarsThisMonth).then(profit => {
+        setTotalNetProfit(profit)
+      }).catch(console.error)
+
+      // Calculate total revenue from sold cars
+      calculateTotalRevenueSold(soldCarsThisMonth).then(({ totalRevenue, showroomInvestment }) => {
+        setTotalRevenueSold(totalRevenue)
+        setTotalShowroomInvestmentSold(showroomInvestment)
+      }).catch(console.error)
+
       // Also load buyers and dealers for the dropdowns
       await loadBuyers(clientId)
       await loadDealers(clientId)
@@ -275,6 +286,126 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Error calculating actual commission earnings:', error)
       return 0
+    }
+  }
+
+  const calculateTotalNetProfit = async (soldCars: CarType[]) => {
+    try {
+      let totalNetProfit = 0
+
+      for (const car of soldCars) {
+        try {
+          // Get car investments
+          const investments = await getCarInvestments(car.id)
+
+          // Get money spent from description (same logic as sold-cars page)
+          let moneySpent = 0
+          if (car.description) {
+            const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+            if (moneySpentMatch) {
+              moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+            }
+          }
+
+          // Create profit distribution data (same as sold-cars page)
+          const saleData = {
+            purchase_price: car.purchase_price,
+            sold_price: car.asking_price,
+            additional_expenses: (car.repair_costs || 0) + (car.additional_expenses || 0) + moneySpent,
+            purchase_commission: car.purchase_commission || 0,
+            dealer_commission: car.dealer_commission || 0,
+            investment: {
+              showroom_investment: car.showroom_investment || 0,
+              investors: investments.map(inv => ({
+                id: inv.investor_id,
+                name: inv.investor?.name || 'Unknown',
+                cnic: inv.investor?.cnic || '',
+                investment_amount: inv.investment_amount || 0
+              })),
+              ownership_type: car.ownership_type || 'partially_owned' as const,
+              commission_type: car.commission_type || 'flat' as const,
+              commission_amount: car.commission_amount || 0,
+              commission_percentage: car.commission_percentage || 0
+            }
+          }
+
+          const distribution = calculateProfitDistribution(saleData)
+
+          // Add showroom share amount to total net profit
+          totalNetProfit += distribution.showroom_share.amount
+
+        } catch (error) {
+          console.error(`Error calculating net profit for car ${car.id}:`, error)
+          // Continue with other cars
+        }
+      }
+
+      return totalNetProfit
+    } catch (error) {
+      console.error('Error calculating total net profit:', error)
+      return 0
+    }
+  }
+
+  const calculateTotalRevenueSold = async (soldCars: CarType[]) => {
+    try {
+      let totalRevenue = 0
+      let showroomInvestment = 0
+
+      for (const car of soldCars) {
+        try {
+          // Add purchase price to showroom investment
+          showroomInvestment += car.purchase_price
+
+          // Get car investments
+          const investments = await getCarInvestments(car.id)
+
+          // Get money spent from description
+          let moneySpent = 0
+          if (car.description) {
+            const moneySpentMatch = car.description.match(/Money spent on car: ₨([\d,]+)/i)
+            if (moneySpentMatch) {
+              moneySpent = parseFloat(moneySpentMatch[1].replace(/,/g, '')) || 0
+            }
+          }
+
+          // Create profit distribution data
+          const saleData = {
+            purchase_price: car.purchase_price,
+            sold_price: car.asking_price,
+            additional_expenses: (car.repair_costs || 0) + (car.additional_expenses || 0) + moneySpent,
+            purchase_commission: car.purchase_commission || 0,
+            dealer_commission: car.dealer_commission || 0,
+            investment: {
+              showroom_investment: car.showroom_investment || 0,
+              investors: investments.map(inv => ({
+                id: inv.investor_id,
+                name: inv.investor?.name || 'Unknown',
+                cnic: inv.investor?.cnic || '',
+                investment_amount: inv.investment_amount || 0
+              })),
+              ownership_type: car.ownership_type || 'partially_owned' as const,
+              commission_type: car.commission_type || 'flat' as const,
+              commission_amount: car.commission_amount || 0,
+              commission_percentage: car.commission_percentage || 0
+            }
+          }
+
+          const distribution = calculateProfitDistribution(saleData)
+
+          // Total revenue = purchase price + showroom profit share
+          totalRevenue += car.purchase_price + distribution.showroom_share.amount
+
+        } catch (error) {
+          console.error(`Error calculating revenue for car ${car.id}:`, error)
+          // Continue with other cars
+        }
+      }
+
+      return { totalRevenue, showroomInvestment }
+    } catch (error) {
+      console.error('Error calculating total revenue from sold cars:', error)
+      return { totalRevenue: 0, showroomInvestment: 0 }
     }
   }
 
@@ -569,6 +700,13 @@ export default function DashboardPage() {
   // Calculate total external investment from car_investments table
   const [totalInvestorInvestment, setTotalInvestorInvestment] = useState(0)
 
+  // Calculate total net profit from sold cars (same as sold cars page)
+  const [totalNetProfit, setTotalNetProfit] = useState(0)
+
+  // Calculate total revenue and showroom investment from sold cars
+  const [totalRevenueSold, setTotalRevenueSold] = useState(0)
+  const [totalShowroomInvestmentSold, setTotalShowroomInvestmentSold] = useState(0)
+
   if (!clientId) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -644,15 +782,51 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Monthly Profit</CardTitle>
-              <TrendingUp className="h-4 w-4 text-blue-500" />
+              <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
+              <TrendingUp className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{formatCurrency(monthlyProfit)}</div>
-              <p className="text-xs text-muted-foreground">This month's total earnings</p>
+              <div className="text-2xl font-bold text-green-600">{formatCurrency(totalNetProfit)}</div>
+              <p className="text-xs text-muted-foreground">Net earnings</p>
             </CardContent>
           </Card>
+        </div>
 
+        {/* Total Revenue Card */}
+        <div className="grid grid-cols-1 gap-6 mb-8">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatCurrency(totalRevenueSold)}</div>
+              <p className="text-xs text-muted-foreground">Gross sales</p>
+              <div className="mt-2 pt-2 border-t">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-600">Generated from Showroom investment:</span>
+                  <span className="font-medium">{formatCurrency(totalShowroomInvestmentSold)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-600">Plus Showroom profit:</span>
+                  <span className="font-medium text-green-600">+{formatCurrency(totalRevenueSold - totalShowroomInvestmentSold)}</span>
+                </div>
+                <div className="flex justify-between text-xs mt-1">
+                  <span className="text-gray-600">ROI of showroom:</span>
+                  <span className="font-medium text-blue-600">
+                    {totalShowroomInvestmentSold > 0
+                      ? `${(((totalRevenueSold - totalShowroomInvestmentSold) / totalShowroomInvestmentSold) * 100).toFixed(2)}%`
+                      : '0%'
+                    }
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Commission Earnings and other cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Commission Earnings</CardTitle>

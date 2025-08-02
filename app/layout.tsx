@@ -19,6 +19,24 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                if (typeof window !== 'undefined') {
+                  const originalFetch = window.fetch;
+                  Object.defineProperty(window, 'fetch', {
+                    get: function() { return originalFetch; },
+                    set: function() { /* Block override */ },
+                    configurable: false
+                  });
+                }
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className={inter.className}>
         <ThemeProvider
           attribute="class"
